@@ -3,6 +3,8 @@ import logging
 import threading
 import os
 import json
+import signal
+import sys
 from typing import Any
 from protocol import (
     MessageType, DataType, send_response, receive_message, 
@@ -22,6 +24,11 @@ class CoffeeShopGateway:
         self.port = port
         self.socket = None
         self.running = False
+        self.shutdown_event = threading.Event()
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+        
         self.data_storage = {
             DataType.USERS: [],
             DataType.TRANSACTIONS: [],
@@ -79,13 +86,26 @@ class CoffeeShopGateway:
             port=self.rabbitmq_port
         )
 
+        # Middleware para recibir resultados procesados desde ResultsWorker
+        self.results_middleware = RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.results_queue_name,
+            port=self.rabbitmq_port
+        )
+
         logger.info(f"Gateway configurado con RabbitMQ: {self.rabbitmq_host}:{self.rabbitmq_port}")
         logger.info(f"Cola de transacciones: {self.transactions_queue_name}")
         logger.info(f"Cola de stores: {self.stores_queue_name}")
         logger.info(f"Cola de transaction items: {self.transaction_items_queue_name}")
         logger.info(f"Cola de menu items: {self.menu_items_queue_name}")
         logger.info(f"Cola de resultados: {self.results_queue_name}")
-        logger.info(f"Chunking configurado: {self.chunk_size} transacciones por chunk")
+        logger.info(f"Chunk size configurado: {self.chunk_size}")
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_event.set()
+        self.running = False
     
     def create_chunks(self, transactions):
         """Divide las transacciones en chunks para procesamiento optimizado"""
@@ -106,8 +126,10 @@ class CoffeeShopGateway:
             
             #logger.info(f"Gateway server started on port {self.port}")
             
-            while self.running:
+            while self.running and not self.shutdown_event.is_set():
                 try:
+                    # Usar timeout para poder verificar shutdown_event
+                    self.socket.settimeout(1.0)
                     client_socket, address = self.socket.accept()
                     # logger.info(f"New client connected from {address}")
                     
@@ -119,8 +141,11 @@ class CoffeeShopGateway:
                     client_thread.daemon = True
                     client_thread.start()
                     
+                except socket.timeout:
+                    # Timeout normal, continuar el bucle
+                    continue
                 except Exception as e:
-                    if self.running:
+                    if self.running and not self.shutdown_event.is_set():
                         logger.error(f"Error accepting connection: {e}")
                     
         except Exception as e:
@@ -131,6 +156,7 @@ class CoffeeShopGateway:
     def stop_server(self):
         """Stop the gateway server"""
         self.running = False
+        self.shutdown_event.set()
         if self.socket:
             self.socket.close()
             logger.info("Gateway server stopped")

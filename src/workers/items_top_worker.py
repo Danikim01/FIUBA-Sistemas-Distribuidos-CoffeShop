@@ -6,6 +6,8 @@ import logging
 from collections import defaultdict
 from datetime import datetime, time
 from typing import Any, Dict, List, Tuple
+import signal
+import threading
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -23,7 +25,11 @@ class ItemsTopWorker:
     def __init__(self) -> None:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
-
+        self.shutdown_requested = False
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+        
         self.items_input_queue = os.getenv('ITEMS_INPUT_QUEUE', 'transaction_items_raw')
         self.menu_items_input_queue = os.getenv('MENU_ITEMS_INPUT_QUEUE', 'menu_items_raw')
         self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
@@ -62,12 +68,25 @@ class ItemsTopWorker:
         self.items_eof_received = False
         self.results_emitted = False
 
+        self.shutdown_event = threading.Event()
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_requested = True
+        self.shutdown_event.set()
+
         logger.info(
             "ItemsTopWorker inicializado - Items: %s, MenuItems: %s, Output: %s",
             self.items_input_queue,
             self.menu_items_input_queue,
             self.output_queue,
         )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_event.set()
 
     def _parse_datetime(self, value: str) -> datetime | None:
         try:
@@ -234,14 +253,17 @@ class ItemsTopWorker:
 
     def cleanup(self) -> None:
         try:
-            self.menu_items_middleware.close()
+            if hasattr(self, 'menu_items_middleware') and self.menu_items_middleware:
+                self.menu_items_middleware.close()
         except Exception as exc:
             logger.debug("Error cerrando menu_items middleware: %s", exc)
         finally:
             try:
-                self.items_middleware.close()
+                if hasattr(self, 'items_middleware') and self.items_middleware:
+                    self.items_middleware.close()
             finally:
-                self.output_middleware.close()
+                if hasattr(self, 'output_middleware') and self.output_middleware:
+                    self.output_middleware.close()
 
 
 def main() -> None:

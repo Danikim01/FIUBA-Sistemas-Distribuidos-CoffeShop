@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import signal
 from typing import Any
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -19,6 +20,10 @@ class AmountFilterWorker:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
+        self.shutdown_requested = False
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
         
         # Colas de entrada y salida configurables por entorno
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_time_filtered')
@@ -45,8 +50,18 @@ class AmountFilterWorker:
         # Monto mínimo requerido
         self.min_amount = 75.0
         
-        # Worker inicializado sin logs para optimización
-        logger.info(f"Filtro de monto: >= {self.min_amount}")
+        logger.info(
+            "AmountFilterWorker inicializado - Input: %s, Output: %s, Prefetch: %s, Min Amount: %s",
+            self.input_queue,
+            self.output_queue,
+            self.prefetch_count,
+            self.min_amount
+        )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_requested = True
     
     def filter_by_amount(self, transaction):
         """
@@ -150,6 +165,10 @@ class AmountFilterWorker:
             def on_message(message):
                 """Callback para procesar mensajes recibidos."""
                 try:
+                    if self.shutdown_requested:
+                        logger.info("Shutdown requested, stopping message processing")
+                        return
+                        
                     if self._is_eof(message):
                         self.output_middleware.send({'type': 'EOF'})
                         self.input_middleware.stop_consuming()
@@ -178,8 +197,10 @@ class AmountFilterWorker:
     def cleanup(self):
         """Limpia recursos."""
         try:
-            self.input_middleware.close()
-            self.output_middleware.close()
+            if hasattr(self, 'input_middleware') and self.input_middleware:
+                self.input_middleware.close()
+            if hasattr(self, 'output_middleware') and self.output_middleware:
+                self.output_middleware.close()
             logger.info("Recursos limpiados")
         except Exception as e:
             logger.warning(f"Error limpiando recursos: {e}")

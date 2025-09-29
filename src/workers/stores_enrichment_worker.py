@@ -4,6 +4,7 @@ import os
 import sys
 import logging
 import threading
+import signal
 from typing import Any, Dict, List
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -26,7 +27,11 @@ class StoresEnrichmentWorker:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
-
+        self.shutdown_event = threading.Event()
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+        
         # Colas de entrada y salida
         self.stores_input_queue = os.getenv('STORES_INPUT_QUEUE', 'stores_raw')
         self.transactions_input_queue = os.getenv('TRANSACTIONS_INPUT_QUEUE', 'transactions_year_filtered')
@@ -70,6 +75,11 @@ class StoresEnrichmentWorker:
             self.transactions_input_queue,
             self.output_queue,
         )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_event.set()
 
     def process_stores_batch(self, stores_batch: List[Dict[str, Any]]) -> None:
         """Procesa un lote de stores y almacena solo metadata esencial"""
@@ -172,19 +182,17 @@ class StoresEnrichmentWorker:
                 logger.error("Error en callback de transacciones: %s", exc)
 
         try:
-            # Iniciar consumo de stores en un hilo separado
-            # stores_thread = threading.Thread(
-            #     target=self.stores_middleware.start_consuming,
-            #     args=(on_stores_message,),
-            #     daemon=True
-            # )
-            # stores_thread.start()
-
-            # Procesar stores primero
+            # Procesar stores y transacciones en paralelo
             logger.info("Iniciando consumo de stores")
-            self.stores_middleware.start_consuming(on_stores_message)
+            stores_thread = threading.Thread(
+                target=self.stores_middleware.start_consuming,
+                args=(on_stores_message,),
+                daemon=True
+            )
+            stores_thread.start()
+            
             logger.info("Iniciando consumo de transacciones")
-            # Después procesar transacciones (stores ya están cargados)
+            # Procesar transacciones en paralelo
             self.transactions_middleware.start_consuming(on_transactions_message)
             
         except KeyboardInterrupt:
@@ -197,12 +205,15 @@ class StoresEnrichmentWorker:
     def cleanup(self) -> None:
         """Limpia recursos"""
         try:
-            self.stores_middleware.close()
+            if hasattr(self, 'stores_middleware') and self.stores_middleware:
+                self.stores_middleware.close()
         finally:
             try:
-                self.transactions_middleware.close()
+                if hasattr(self, 'transactions_middleware') and self.transactions_middleware:
+                    self.transactions_middleware.close()
             finally:
-                self.output_middleware.close()
+                if hasattr(self, 'output_middleware') and self.output_middleware:
+                    self.output_middleware.close()
 
 
 def main() -> None:

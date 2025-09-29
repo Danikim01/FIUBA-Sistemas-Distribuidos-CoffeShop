@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import signal
 from datetime import datetime
 from collections import defaultdict
 from typing import Any, Dict, Tuple
@@ -28,6 +29,10 @@ class TPVWorker:
     def __init__(self) -> None:
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
+        self.shutdown_requested = False
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_time_filtered_tpv')
         self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
@@ -55,6 +60,11 @@ class TPVWorker:
             self.input_queue,
             self.output_queue,
         )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_requested = True
 
     def _update_totals(self, transaction: Dict[str, Any]) -> None:
         try:
@@ -128,6 +138,10 @@ class TPVWorker:
 
         def on_message(message: Any) -> None:
             try:
+                if self.shutdown_requested:
+                    logger.info("Shutdown requested, stopping message processing")
+                    return
+                    
                 if _is_eof(message):
                     self._emit_summary()
                     self._send_payload({'type': 'EOF', 'source': 'tpv'})

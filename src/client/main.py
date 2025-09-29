@@ -5,6 +5,7 @@ import logging
 import yaml
 import sys
 import json
+import signal
 from typing import List, Dict, Any
 from protocol import (DataType, send_batch, send_eof, receive_response)
 
@@ -13,6 +14,15 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Variable global para manejo de SIGTERM
+shutdown_requested = False
+
+def handle_sigterm(signum, frame):
+    """Maneja la señal SIGTERM para terminar ordenadamente"""
+    global shutdown_requested
+    logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+    shutdown_requested = True
 
 def load_config(config_input) -> Dict[str, Any]:
     """Load configuration from YAML file or dictionary"""
@@ -480,6 +490,9 @@ class CoffeeShopClient:
             ]
             
             for data_type, data_type_str in data_types:
+                if shutdown_requested:
+                    logger.info("Shutdown requested, stopping data transmission")
+                    break
                 logger.info(f"Starting to send {data_type_str} data")
                 self.send_data_type_files(data_type, data_type_str)
             
@@ -495,6 +508,9 @@ class CoffeeShopClient:
 
 def main():
     """Entry point"""
+    # Configurar manejo de SIGTERM
+    signal.signal(signal.SIGTERM, handle_sigterm)
+    
     config_file = sys.argv[1] if len(sys.argv) > 1 else 'config.yaml'
     client = CoffeeShopClient(config_file)
     client.run()

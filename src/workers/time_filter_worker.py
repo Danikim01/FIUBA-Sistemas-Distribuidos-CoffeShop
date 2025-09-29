@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import signal
 from typing import Any
 from datetime import datetime, time
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
@@ -20,6 +21,10 @@ class TimeFilterWorker:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
+        self.shutdown_requested = False
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
         
         # Colas de entrada y salida configurables por entorno
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_year_filtered')
@@ -59,13 +64,22 @@ class TimeFilterWorker:
             )
             for queue_name in self.output_queue_names
         ]
-
-    
+        
         # Definir rango de horas (06:00 AM - 11:00 PM)
         self.start_time = time(6, 0)   # 06:00 AM
         self.end_time = time(23, 0)    # 11:00 PM (23:00)
         
-        # Worker inicializado sin logs para optimización
+        logger.info(
+            "TimeFilterWorker inicializado - Input: %s, Output: %s, Prefetch: %s",
+            self.input_queue,
+            self.output_queue_names,
+            self.prefetch_count
+        )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_requested = True
         # Filtro de hora configurado
     
     def filter_by_time(self, transaction):
@@ -151,6 +165,10 @@ class TimeFilterWorker:
             def on_message(message):
                 """Callback para procesar mensajes recibidos."""
                 try:
+                    if self.shutdown_requested:
+                        logger.info("Shutdown requested, stopping message processing")
+                        return
+                        
                     if self._is_eof(message):
                         for middleware in self.output_middlewares:
                             middleware.send({'type': 'EOF'})
@@ -180,9 +198,11 @@ class TimeFilterWorker:
     def cleanup(self):
         """Limpia recursos."""
         try:
-            self.input_middleware.close()
-            for middleware in self.output_middlewares:
-                middleware.close()
+            if hasattr(self, 'input_middleware') and self.input_middleware:
+                self.input_middleware.close()
+            if hasattr(self, 'output_middlewares') and self.output_middlewares:
+                for middleware in self.output_middlewares:
+                    middleware.close()
             logger.info("Recursos limpiados")
         except Exception as e:
             logger.warning(f"Error limpiando recursos: {e}")

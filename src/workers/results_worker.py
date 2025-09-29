@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import signal
 from typing import Any, Dict, List
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -22,7 +23,11 @@ class ResultsWorker:
     def __init__(self):
         self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
         self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", 5672))
-
+        self.shutdown_requested = False
+        
+        # Configurar manejo de SIGTERM
+        signal.signal(signal.SIGTERM, self._handle_sigterm)
+        
         # Colas de entrada y salida configurables por entorno
         self.input_queue = os.getenv("INPUT_QUEUE", "transactions_final_results")
         self.output_queue = os.getenv("OUTPUT_QUEUE", "gateway_results")
@@ -55,6 +60,11 @@ class ResultsWorker:
             self.input_queue,
             self.output_queue,
         )
+
+    def _handle_sigterm(self, signum, frame):
+        """Maneja la señal SIGTERM para terminar ordenadamente"""
+        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.shutdown_requested = True
 
     def process_result(self, result: Dict[str, Any]) -> None:
         """Reenvía un resultado individual al gateway."""
@@ -107,6 +117,10 @@ class ResultsWorker:
 
             def on_message(message: Any) -> None:
                 try:
+                    if self.shutdown_requested:
+                        logger.info("Shutdown requested, stopping message processing")
+                        return
+                        
                     self._handle_message(message)
                 except Exception as exc:  # noqa: BLE001
                     logger.error("Error en callback de mensaje: %s", exc)
@@ -123,8 +137,10 @@ class ResultsWorker:
     def cleanup(self) -> None:
         """Limpia recursos al finalizar."""
         try:
-            self.input_middleware.close()
-            self.output_middleware.close()
+            if hasattr(self, 'input_middleware') and self.input_middleware:
+                self.input_middleware.close()
+            if hasattr(self, 'output_middleware') and self.output_middleware:
+                self.output_middleware.close()
             logger.info("ResultsWorker finalizado - total reenviado: %s", self.result_count)
         except Exception as exc:
             logger.warning("Error limpiando recursos: %s", exc)
