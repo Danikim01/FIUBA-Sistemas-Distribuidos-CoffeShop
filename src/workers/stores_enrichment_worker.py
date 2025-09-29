@@ -27,8 +27,7 @@ class StoresEnrichmentWorker:
     def __init__(self):
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', 5672))
-        self.shutdown_event = threading.Event()
-        
+        self.shutdown_requested = False
         # Configurar manejo de SIGTERM
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         
@@ -79,7 +78,10 @@ class StoresEnrichmentWorker:
     def _handle_sigterm(self, signum, frame):
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
-        self.shutdown_event.set()
+        self.stores_middleware.stop_consuming()
+        self.transactions_middleware.stop_consuming()
+        self.shutdown_requested = True
+        
 
     def process_stores_batch(self, stores_batch: List[Dict[str, Any]]) -> None:
         """Procesa un lote de stores y almacena solo metadata esencial"""
@@ -171,26 +173,32 @@ class StoresEnrichmentWorker:
 
         def on_stores_message(message: Any) -> None:
             try:
+                if self.shutdown_requested:
+                    logger.info("Shutdown requested, stopping stores processing")
+                    return
                 self.process_stores_message(message)
             except Exception as exc:
                 logger.error("Error en callback de stores: %s", exc)
 
         def on_transactions_message(message: Any) -> None:
             try:
+                if self.shutdown_requested:
+                    logger.info("Shutdown requested, stopping transactions processing")
+                    return
                 self.process_transactions_message(message)
             except Exception as exc:
                 logger.error("Error en callback de transacciones: %s", exc)
 
         try:
-            # Procesar stores y transacciones en paralelo
-            logger.info("Iniciando consumo de stores")
-            stores_thread = threading.Thread(
-                target=self.stores_middleware.start_consuming,
-                args=(on_stores_message,),
-                daemon=True
-            )
-            stores_thread.start()
-            
+            # # Procesar stores y transacciones en paralelo
+            # logger.info("Iniciando consumo de stores")
+            # stores_thread = threading.Thread(
+            #     target=self.stores_middleware.start_consuming,
+            #     args=(on_stores_message,),
+            #     daemon=True
+            # )
+            # stores_thread.start()
+            self.stores_middleware.start_consuming(on_stores_message)
             logger.info("Iniciando consumo de transacciones")
             # Procesar transacciones en paralelo
             self.transactions_middleware.start_consuming(on_transactions_message)

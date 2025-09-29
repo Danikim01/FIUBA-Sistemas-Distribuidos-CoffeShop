@@ -58,6 +58,7 @@ class YearFilterWorker:
     def _handle_sigterm(self, signum, frame):
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
+        self.input_middleware.stop_consuming()
         self.shutdown_requested = True
     
     def filter_by_year(self, transaction):

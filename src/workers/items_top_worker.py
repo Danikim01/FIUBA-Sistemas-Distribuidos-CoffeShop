@@ -68,13 +68,6 @@ class ItemsTopWorker:
         self.items_eof_received = False
         self.results_emitted = False
 
-        self.shutdown_event = threading.Event()
-
-    def _handle_sigterm(self, signum, frame):
-        """Maneja la señal SIGTERM para terminar ordenadamente"""
-        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
-        self.shutdown_requested = True
-        self.shutdown_event.set()
 
         logger.info(
             "ItemsTopWorker inicializado - Items: %s, MenuItems: %s, Output: %s",
@@ -86,7 +79,10 @@ class ItemsTopWorker:
     def _handle_sigterm(self, signum, frame):
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
-        self.shutdown_event.set()
+        self.menu_items_middleware.stop_consuming()
+        self.items_middleware.stop_consuming()
+        self.shutdown_requested = True
+
 
     def _parse_datetime(self, value: str) -> datetime | None:
         try:
@@ -220,6 +216,10 @@ class ItemsTopWorker:
         logger.info("ItemsTopWorker iniciando consumo")
 
         def on_menu_items(message: Any) -> None:
+            if self.shutdown_requested:
+                logger.info("Shutdown requested, stopping menu items processing")
+                return
+                
             if _is_eof(message):
                 self.menu_items_eof_received = True
                 self.menu_items_middleware.stop_consuming()
@@ -231,6 +231,10 @@ class ItemsTopWorker:
                 self.process_menu_items_batch([message])
 
         def on_items(message: Any) -> None:
+            if self.shutdown_requested:
+                logger.info("Shutdown requested, stopping items processing")
+                return
+                
             if _is_eof(message):
                 self.items_eof_received = True
                 self._finalize_if_ready()

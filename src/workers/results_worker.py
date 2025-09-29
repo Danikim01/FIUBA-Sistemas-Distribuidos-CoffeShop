@@ -65,6 +65,7 @@ class ResultsWorker:
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
         self.shutdown_requested = True
+        self.input_middleware.stop_consuming()
 
     def process_result(self, result: Dict[str, Any]) -> None:
         """Reenvía un resultado individual al gateway."""
