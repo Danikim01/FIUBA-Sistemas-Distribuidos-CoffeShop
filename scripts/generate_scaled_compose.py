@@ -41,7 +41,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered",
+            "OUTPUT_QUEUE": "transactions_year_filtered"
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
     },
@@ -53,7 +53,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "supports_prefetch": True,
         "default_prefetch": 20,
         "default_environment": {
-            "INPUT_QUEUE": "transactions_year_filtered",
+            "INPUT_QUEUE": "transactions_enriched",
             "OUTPUT_QUEUE": "transactions_time_filtered",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
@@ -71,6 +71,24 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
     },
+    "stores_enrichment": {
+        "display_name": "Stores Enrichment Workers",
+        "base_service_name": "stores-enrichment-worker",
+        "command": ["python", "stores_enrichment_worker.py"],
+        "needs_worker_id": False,
+        "supports_prefetch": True,
+        "default_prefetch": 20,
+        "default_environment": {
+            "STORES_INPUT_QUEUE": "stores_raw",
+            "TRANSACTIONS_INPUT_QUEUE": "transactions_year_filtered",
+            "OUTPUT_QUEUE": "transactions_enriched"
+        },
+        "required_environment": [
+            "STORES_INPUT_QUEUE",
+            "TRANSACTIONS_INPUT_QUEUE", 
+            "OUTPUT_QUEUE",
+        ],
+    },
     "tpv": {
         "display_name": "TPV Aggregation Workers",
         "base_service_name": "tpv-worker",
@@ -79,7 +97,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "supports_prefetch": True,
         "default_prefetch": 20,
         "default_environment": {
-            "INPUT_QUEUE": "transactions_time_filtered_tpv",
+            "INPUT_QUEUE": "transactions_enriched",
             "OUTPUT_QUEUE": "transactions_final_results",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],

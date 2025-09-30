@@ -27,7 +27,7 @@ class TimeFilterWorker:
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         
         # Colas de entrada y salida configurables por entorno
-        self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_year_filtered')
+        self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_enriched')
         self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_time_filtered')
 
         # Permitir fan-out a múltiples colas configuradas por coma

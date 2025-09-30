@@ -32,7 +32,7 @@
         {
           "count": 2,
           "environment": {
-            "INPUT_QUEUE": "transactions_year_filtered",
+            "INPUT_QUEUE": "transactions_enriched",
             "OUTPUT_QUEUE": "transactions_time_filtered",
             "OUTPUT_QUEUES": "transactions_time_filtered,transactions_time_filtered_tpv"
           }
@@ -57,7 +57,8 @@
         {
           "count": 1,
           "environment": {
-            "INPUT_QUEUE": "transactions_raw",
+            "STORES_INPUT_QUEUE": "stores_raw",
+            "TRANSACTIONS_INPUT_QUEUE": "transactions_year_filtered",
             "OUTPUT_QUEUE": "transactions_enriched"
           }
         }

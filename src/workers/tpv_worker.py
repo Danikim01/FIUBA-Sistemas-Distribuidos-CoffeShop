@@ -71,6 +71,7 @@ class TPVWorker:
         try:
             created_at = transaction.get('created_at')
             store_id_raw = transaction.get('store_id')
+            store_name = transaction.get('store_name')
             final_amount_raw = transaction.get('final_amount')
 
             if not created_at or store_id_raw is None or final_amount_raw is None:
@@ -82,7 +83,7 @@ class TPVWorker:
             final_amount = float(final_amount_raw)
             semester = _semester_from_month(dt.month)
 
-            key = (store_id, dt.year, semester)
+            key = (store_id, store_name, dt.year, semester)
             self._totals[key] += final_amount
         except (ValueError, TypeError) as exc:
             logger.warning('Transacción omitida por datos inválidos: %s', exc)
@@ -107,12 +108,13 @@ class TPVWorker:
             return
 
         results = []
-        for (store_id, year, semester), total in sorted(
+        for (store_id, store_name, year, semester), total in sorted(
             self._totals.items(),
-            key=lambda item: (item[0][1], item[0][2], item[0][0]),
+            key=lambda item: (item[0][1], item[0][2], item[0][3], item[0][0]),
         ):
             results.append(
                 {
+                    'store_name': store_name,
                     'store_id': store_id,
                     'year': year,
                     'semester': semester,

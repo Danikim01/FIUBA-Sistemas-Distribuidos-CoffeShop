@@ -254,6 +254,7 @@ class CoffeeShopClient:
                 return
 
             for entry in results:
+                store_name = entry.get('store_name', 'unknown')
                 store_id = entry.get('store_id', 'unknown')
                 year = entry.get('year', 'unknown')
                 semester = entry.get('semester', 'unknown')
@@ -261,7 +262,7 @@ class CoffeeShopClient:
                     tpv_value = float(entry.get('tpv', 0))
                 except (TypeError, ValueError):
                     tpv_value = 0.0
-                print(f"Sucursal {store_id} - {year} {semester}: ${tpv_value:0.2f}")
+                print(f"Sucursal {store_name} - {year} {semester}: ${tpv_value:0.2f}")
 
             print("-" * 50)
             logger.info(
