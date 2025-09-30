@@ -32,7 +32,7 @@
         {
           "count": 2,
           "environment": {
-            "INPUT_QUEUE": "transactions_enriched",
+            "INPUT_QUEUE": "transactions_year_filtered",
             "OUTPUT_QUEUE": "transactions_time_filtered",
             "OUTPUT_QUEUES": "transactions_time_filtered,transactions_time_filtered_tpv"
           }
@@ -58,8 +58,8 @@
           "count": 1,
           "environment": {
             "STORES_INPUT_QUEUE": "stores_raw",
-            "TRANSACTIONS_INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_enriched"
+            "TPV_INPUT_QUEUE": "tpv_results",
+            "OUTPUT_QUEUE": "transactions_final_results"
           }
         }
       ]
@@ -71,7 +71,7 @@
           "count": 1,
           "environment": {
             "INPUT_QUEUE": "transactions_time_filtered_tpv",
-            "OUTPUT_QUEUE": "transactions_final_results"
+            "OUTPUT_QUEUE": "tpv_results"
           }
         }
       ]
@@ -96,7 +96,7 @@
           "environment": {
             "INPUT_QUEUE": "transactions_final_results",
             "OUTPUT_QUEUE": "gateway_results",
-            "EXPECTED_EOF_COUNT": 3
+            "EXPECTED_EOF_COUNT": 2
           }
         }
       ]

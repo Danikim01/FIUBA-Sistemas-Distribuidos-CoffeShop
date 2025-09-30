@@ -80,12 +80,12 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "STORES_INPUT_QUEUE": "stores_raw",
-            "TRANSACTIONS_INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_enriched"
+            "TPV_INPUT_QUEUE": "tpv_results",
+            "OUTPUT_QUEUE": "transactions_final_results"
         },
         "required_environment": [
             "STORES_INPUT_QUEUE",
-            "TRANSACTIONS_INPUT_QUEUE", 
+            "TPV_INPUT_QUEUE", 
             "OUTPUT_QUEUE",
         ],
     },
@@ -97,8 +97,8 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "supports_prefetch": True,
         "default_prefetch": 20,
         "default_environment": {
-            "INPUT_QUEUE": "transactions_enriched",
-            "OUTPUT_QUEUE": "transactions_final_results",
+            "INPUT_QUEUE": "transactions_time_filtered_tpv",
+            "OUTPUT_QUEUE": "tpv_results",
         },
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
     },
@@ -290,7 +290,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docker-compose-scaled.yml"),
+        default=Path("docker-compose.yml"),
         help="Path where the generated docker-compose file will be written",
     )
     return parser.parse_args()

@@ -35,7 +35,7 @@ class TPVWorker:
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_time_filtered_tpv')
-        self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
+        self.output_queue = os.getenv('OUTPUT_QUEUE', 'tpv_results')
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', 10))
 

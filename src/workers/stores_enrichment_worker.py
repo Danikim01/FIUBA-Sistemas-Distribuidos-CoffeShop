@@ -3,7 +3,6 @@
 import os
 import sys
 import logging
-import threading
 import signal
 from typing import Any, Dict, List
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
@@ -20,8 +19,8 @@ def _is_eof(message: Any) -> bool:
 
 class StoresEnrichmentWorker:
     """
-    Worker que enriquece transacciones con datos de stores.
-    Sigue el patrón de joiner de proyectos anteriores.
+    Worker que enriquece resultados de TPV con nombres de stores.
+    Consume resultados del TPV worker y los enriquece con store names.
     """
 
     def __init__(self):
@@ -33,8 +32,8 @@ class StoresEnrichmentWorker:
         
         # Colas de entrada y salida
         self.stores_input_queue = os.getenv('STORES_INPUT_QUEUE', 'stores_raw')
-        self.transactions_input_queue = os.getenv('TRANSACTIONS_INPUT_QUEUE', 'transactions_year_filtered')
-        self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_enriched')
+        self.tpv_input_queue = os.getenv('TPV_INPUT_QUEUE', 'tpv_results')
+        self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_final_results')
 
         # Configuración de prefetch
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', 10))
@@ -47,10 +46,10 @@ class StoresEnrichmentWorker:
             prefetch_count=self.prefetch_count,
         )
 
-        # Middleware para transacciones
-        self.transactions_middleware = RabbitMQMiddlewareQueue(
+        # Middleware para TPV results
+        self.tpv_middleware = RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
-            queue_name=self.transactions_input_queue,
+            queue_name=self.tpv_input_queue,
             port=self.rabbitmq_port,
             prefetch_count=self.prefetch_count,
         )
@@ -66,12 +65,12 @@ class StoresEnrichmentWorker:
         self.stores_lookup = {}  # {store_id: store_name} - solo metadata esencial
         self.stores_loaded = False
         self.stores_eof_received = False
-        self.transactions_eof_received = False
+        self.tpv_eof_received = False
 
         logger.info(
-            "StoresEnrichmentWorker inicializado - Stores: %s, Transactions: %s, Output: %s",
+            "StoresEnrichmentWorker inicializado - Stores: %s, TPV: %s, Output: %s",
             self.stores_input_queue,
-            self.transactions_input_queue,
+            self.tpv_input_queue,
             self.output_queue,
         )
 
@@ -79,7 +78,7 @@ class StoresEnrichmentWorker:
         """Maneja la señal SIGTERM para terminar ordenadamente"""
         logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
         self.stores_middleware.stop_consuming()
-        self.transactions_middleware.stop_consuming()
+        self.tpv_middleware.stop_consuming()
         self.shutdown_requested = True
         
 
@@ -95,6 +94,7 @@ class StoresEnrichmentWorker:
                 logger.info("Store metadata almacenada: ID=%s, Name=%s", store_id, store_name)
         
         logger.info("Total stores en lookup: %s", len(self.stores_lookup))
+
     def process_stores_message(self, message: Any) -> None:
         """Procesa mensajes de stores"""
         if _is_eof(message):
@@ -109,67 +109,76 @@ class StoresEnrichmentWorker:
             self.process_stores_batch(message)
         
 
-    def enrich_transaction(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
-        """Enriquece una transacción con datos de store"""
+    def enrich_tpv_result(self, tpv_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Enriquece un resultado de TPV con el nombre de store desde lookup"""
         try:
-            store_id = transaction.get('store_id')
+            store_id = tpv_result.get('store_id')
             if store_id is None:
-                return transaction
+                return tpv_result
 
-            # Lookup en metadata almacenada (como en proyectos anteriores)
+            # Lookup en metadata almacenada
             store_name = self.stores_lookup.get(int(store_id), '')
             
-            # Crear transacción enriquecida
-            enriched_transaction = {
-                **transaction,
+            # Actualizar el resultado de TPV con el nombre correcto de la store
+            enriched_result = {
+                **tpv_result,
                 'store_name': store_name,
             }
             
-            return enriched_transaction
+            return enriched_result
             
         except Exception as exc:
-            logger.error("Error enriqueciendo transacción: %s", exc)
-            return transaction
+            logger.error("Error enriqueciendo resultado TPV: %s", exc)
+            return tpv_result
 
-    def process_transactions_batch(self, transactions_batch: List[Dict[str, Any]]) -> None:
-        """Procesa un lote de transacciones y las enriquece"""
-        # Esperar a que el procesamiento de stores esté completo        
+    def process_tpv_summary(self, tpv_summary: Dict[str, Any]) -> None:
+        """Procesa y enriquece un resumen de TPV"""
         try:
-            enriched_transactions = []
-            for transaction in transactions_batch:
-                enriched_transaction = self.enrich_transaction(transaction)
-                enriched_transactions.append(enriched_transaction)
+            results = tpv_summary.get('results', [])
+            enriched_results = []
+            
+            for result in results:
+                enriched_result = self.enrich_tpv_result(result)
+                enriched_results.append(enriched_result)
 
-            self.output_middleware.send(enriched_transactions)
+            # Crear el resumen enriquecido
+            enriched_summary = {
+                **tpv_summary,
+                'results': enriched_results,
+            }
+
+            self.output_middleware.send(enriched_summary)
+            logger.info("TPV summary enriquecido y enviado con %s resultados", len(enriched_results))
             
         except Exception as exc:
-            logger.error("Error procesando lote de transacciones: %s", exc)
+            logger.error("Error procesando TPV summary: %s", exc)
 
-    def process_transactions_message(self, message: Any) -> None:
-        """Procesa mensajes de transacciones"""
+    def process_tpv_message(self, message: Any) -> None:
+        """Procesa mensajes del TPV worker"""
         if _is_eof(message):
-            logger.info("EOF recibido para transacciones")
-            self.transactions_eof_received = True
+            logger.info("EOF recibido para TPV")
+            self.tpv_eof_received = True
             self._check_completion()
             return
 
-        if isinstance(message, list):
-            self.process_transactions_batch(message)
+        # Procesar resultado de TPV
+        if isinstance(message, dict) and message.get('type') == 'tpv_summary':
+            self.process_tpv_summary(message)
         else:
-            # Procesar transacción individual
-            enriched_transaction = self.enrich_transaction(message)
-            self.output_middleware.send(enriched_transaction)
+            # Fallback para otros tipos de mensaje
+            enriched_result = self.enrich_tpv_result(message)
+            self.output_middleware.send(enriched_result)
 
     def _check_completion(self) -> None:
         """Verifica si se han recibido EOF de ambos tipos de datos"""
-        if self.stores_eof_received and self.transactions_eof_received:
+        if self.stores_eof_received and self.tpv_eof_received:
             logger.info("Todos los EOF recibidos, enviando EOF de salida")
             self.output_middleware.send({'type': 'EOF'})
-            self.transactions_middleware.stop_consuming()
+            self.tpv_middleware.stop_consuming()
 
     def start_consuming(self) -> None:
         """Inicia el consumo de mensajes de ambas colas en paralelo"""
-        logger.info("Iniciando consumo de stores y transacciones")
+        logger.info("Iniciando consumo de stores y TPV results")
 
         def on_stores_message(message: Any) -> None:
             try:
@@ -180,28 +189,21 @@ class StoresEnrichmentWorker:
             except Exception as exc:
                 logger.error("Error en callback de stores: %s", exc)
 
-        def on_transactions_message(message: Any) -> None:
+        def on_tpv_message(message: Any) -> None:
             try:
                 if self.shutdown_requested:
-                    logger.info("Shutdown requested, stopping transactions processing")
+                    logger.info("Shutdown requested, stopping TPV processing")
                     return
-                self.process_transactions_message(message)
+                self.process_tpv_message(message)
             except Exception as exc:
-                logger.error("Error en callback de transacciones: %s", exc)
+                logger.error("Error en callback de TPV: %s", exc)
 
         try:
-            # # Procesar stores y transacciones en paralelo
-            # logger.info("Iniciando consumo de stores")
-            # stores_thread = threading.Thread(
-            #     target=self.stores_middleware.start_consuming,
-            #     args=(on_stores_message,),
-            #     daemon=True
-            # )
-            # stores_thread.start()
+            # Procesar stores para construir lookup table
             self.stores_middleware.start_consuming(on_stores_message)
-            logger.info("Iniciando consumo de transacciones")
-            # Procesar transacciones en paralelo
-            self.transactions_middleware.start_consuming(on_transactions_message)
+            logger.info("Iniciando consumo de TPV results")
+            # Procesar resultados de TPV
+            self.tpv_middleware.start_consuming(on_tpv_message)
             
         except KeyboardInterrupt:
             logger.info("StoresEnrichmentWorker interrumpido por el usuario")
@@ -217,8 +219,8 @@ class StoresEnrichmentWorker:
                 self.stores_middleware.close()
         finally:
             try:
-                if hasattr(self, 'transactions_middleware') and self.transactions_middleware:
-                    self.transactions_middleware.close()
+                if hasattr(self, 'tpv_middleware') and self.tpv_middleware:
+                    self.tpv_middleware.close()
             finally:
                 if hasattr(self, 'output_middleware') and self.output_middleware:
                     self.output_middleware.close()
