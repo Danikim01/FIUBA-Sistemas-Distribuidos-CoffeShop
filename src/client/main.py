@@ -253,7 +253,14 @@ class CoffeeShopClient:
                 logger.info("TPV summary received without results")
                 return
 
-            for entry in results:
+            # Sort results by year, semester, and store_name
+            sorted_results = sorted(results, key=lambda x: (
+                x.get('year', 0), 
+                x.get('semester', ''), 
+                x.get('store_name', '')
+            ))
+
+            for entry in sorted_results:
                 store_name = entry.get('store_name', 'unknown')
                 store_id = entry.get('store_id', 'unknown')
                 year = entry.get('year', 'unknown')
