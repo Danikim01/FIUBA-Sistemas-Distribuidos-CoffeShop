@@ -29,6 +29,19 @@ class YearFilterWorker:
         # Colas de entrada y salida configurables por entorno
         self.input_queue = os.getenv('INPUT_QUEUE', 'transactions_raw')
         self.output_queue = os.getenv('OUTPUT_QUEUE', 'transactions_year_filtered')
+
+        raw_output_queues = os.getenv('OUTPUT_QUEUES')
+        if raw_output_queues:
+            queue_names = [name.strip() for name in raw_output_queues.split(',') if name.strip()]
+        else:
+            queue_names = []
+
+        if not queue_names:
+            queue_names = [self.output_queue]
+        elif self.output_queue and self.output_queue not in queue_names:
+            queue_names.insert(0, self.output_queue)
+
+        self.output_queue_names = queue_names
         
         # Configuración de prefetch para load balancing
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', 10))
@@ -41,17 +54,20 @@ class YearFilterWorker:
             prefetch_count=self.prefetch_count
         )
         
-        # Middleware para enviar datos filtrados
-        self.output_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.output_queue,
-            port=self.rabbitmq_port
-        )
+        # Middlewares para enviar datos filtrados
+        self.output_middlewares = [
+            RabbitMQMiddlewareQueue(
+                host=self.rabbitmq_host,
+                queue_name=queue_name,
+                port=self.rabbitmq_port
+            )
+            for queue_name in self.output_queue_names
+        ]
         
         logger.info(
-            "YearFilterWorker inicializado - Input: %s, Output: %s, Prefetch: %s",
+            "YearFilterWorker inicializado - Input: %s, Outputs: %s, Prefetch: %s",
             self.input_queue,
-            self.output_queue,
+            self.output_queue_names,
             self.prefetch_count
         )
 
@@ -103,7 +119,8 @@ class YearFilterWorker:
             # Aplicar filtro de año
             if self.filter_by_year(transaction):
                 # Enviar transacción filtrada al siguiente worker
-                self.output_middleware.send(transaction)
+                for middleware in self.output_middlewares:
+                    middleware.send(transaction)
                 
         except Exception:
             pass
@@ -125,7 +142,8 @@ class YearFilterWorker:
             
             # Enviar chunk filtrado si tiene transacciones
             if filtered_transactions:
-                self.output_middleware.send(filtered_transactions)
+                for middleware in self.output_middlewares:
+                    middleware.send(filtered_transactions)
             
         except Exception:
             pass
@@ -143,7 +161,8 @@ class YearFilterWorker:
                         return
                         
                     if self._is_eof(message):
-                        self.output_middleware.send({'type': 'EOF'})
+                        for middleware in self.output_middlewares:
+                            middleware.send({'type': 'EOF'})
                         self.input_middleware.stop_consuming()
                         return
 
@@ -172,8 +191,11 @@ class YearFilterWorker:
         try:
             if hasattr(self, 'input_middleware') and self.input_middleware:
                 self.input_middleware.close()
-            if hasattr(self, 'output_middleware') and self.output_middleware:
-                self.output_middleware.close()
+            for middleware in getattr(self, 'output_middlewares', []):
+                try:
+                    middleware.close()
+                except Exception:
+                    pass
             logger.info("Recursos limpiados")
         except Exception as e:
             logger.warning(f"Error limpiando recursos: {e}")

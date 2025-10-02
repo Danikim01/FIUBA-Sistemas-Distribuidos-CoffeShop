@@ -89,7 +89,13 @@ class CoffeeShopClient:
         self._tpv_header_printed = False
         self._quantity_header_printed = False
         self._profit_header_printed = False
-        self._results_header_printed = False
+        self._transactions_header_printed = False
+        self._amount_summary_printed = False
+        self._amount_results_total = 0
+        self._top_clients_header_printed = False
+        self._top_clients_section_printed = False
+        self._top_clients_summary_printed = False
+        self._top_clients_total = 0
 
         logger.info(
             f"Client configured - Gateway: {self.gateway_host}:{self.gateway_port}, "
@@ -114,29 +120,68 @@ class CoffeeShopClient:
             logger.info("Disconnected from gateway")
 
 
-    def _print_results_header(self):
-        """Print the results banner only once."""
-        if self._results_header_printed:
+    def _print_transactions_header(self) -> None:
+        if self._transactions_header_printed:
             return
 
         print("=" * 60)
-        print("RESULTADOS DE LA QUERY:")
         print("Transacciones (Id y monto) realizadas durante 2024 y 2025")
         print("entre las 06:00 AM y las 11:00 PM con monto total >= $75")
         print("=" * 60)
-        self._results_header_printed = True
-        
-    def _print_results_summary(self) -> None:
-        self._print_results_header()
+        self._transactions_header_printed = True
+
+    def _render_amount_summary(self, payload: Dict[str, Any]) -> None:
+        count = int(payload.get('results_count', 0))
+        self._amount_results_total = count
+        self.results_received = count
+
+        self._print_transactions_header()
         print(
             "Total de transacciones que cumplen las condiciones: "
-            f"{self.results_received}"
+            f"{self._amount_results_total}"
         )
         print("-" * 50)
+        self._amount_summary_printed = True
         logger.info(
             "Reported total of %s transacciones filtradas por monto al usuario",
-            self.results_received,
+            self._amount_results_total,
         )
+
+    def _print_top_clients_header(self) -> None:
+        if self._top_clients_header_printed:
+            return
+
+        print("=" * 60)
+        print("Cumpleaños de los clientes con más compras por sucursal (2024-2025)")
+        print("=" * 60)
+        self._top_clients_header_printed = True
+
+    def _ensure_top_clients_summary(self) -> None:
+        if self._top_clients_summary_printed:
+            return
+
+        if self._top_clients_total > 0:
+            print(
+                "Total de clientes destacados que cumplen las condiciones: "
+                f"{self._top_clients_total}"
+            )
+            print("-" * 50)
+        else:
+            print("Sin clientes destacados que cumplan las condiciones.")
+            print("-" * 50)
+
+        self._top_clients_summary_printed = True
+        logger.info(
+            "Reported total of %s clientes destacados al usuario",
+            self._top_clients_total,
+        )
+
+    def _print_results_summary(self) -> None:
+        if not self._amount_summary_printed and self._amount_results_total:
+            self._render_amount_summary({'results_count': self._amount_results_total})
+
+        self._print_top_clients_header()
+        self._ensure_top_clients_summary()
 
     def _render_top_items_table(
         self,
@@ -197,6 +242,30 @@ class CoffeeShopClient:
             '_profit_header_printed',
         )
 
+    def _render_top_clients_birthdays(self, payload: Dict[str, Any]) -> None:
+        self._print_top_clients_header()
+
+        if not getattr(self, '_top_clients_section_printed', False):
+            print("=" * 60)
+            print("TOP CLIENTES POR SUCURSAL (2024-2025)")
+            print("Incluye empates hasta el tercer nivel de compras")
+            print("=" * 60)
+            self._top_clients_section_printed = True
+
+        rows = payload.get('results') or []
+
+        print("user_id - store_name - birthdate - purchases_qty")
+        for row in rows:
+            user_id = row.get('user_id', '')
+            store_name = row.get('store_name', '')
+            birthdate = row.get('birthdate', '')
+            purchases_qty = row.get('purchases_qty', 0)
+            print(f"{user_id} - {store_name} - {birthdate} - {purchases_qty}")
+
+        print("-" * 50)
+        self._top_clients_total += len(rows)
+        self._top_clients_summary_printed = False
+
     def _handle_single_result(self, result: Dict[str, Any]) -> bool:
         """Print a single result message received from the results stream.
 
@@ -223,6 +292,12 @@ class CoffeeShopClient:
                 return True
             if normalized_type == 'TOP_ITEMS_BY_PROFIT':
                 self._render_top_items_by_profit(result)
+                return True
+            if normalized_type == 'AMOUNT_FILTER_SUMMARY':
+                self._render_amount_summary(result)
+                return True
+            if normalized_type == 'TOP_CLIENTS_BIRTHDAYS':
+                self._render_top_clients_birthdays(result)
                 return True
 
         self.results_received += 1

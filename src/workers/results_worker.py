@@ -54,6 +54,7 @@ class ResultsWorker:
         )
 
         self.result_count = 0
+        self.amount_results = 0
 
         logger.info(
             "ResultsWorker inicializado - Input: %s, Output: %s",
@@ -67,26 +68,72 @@ class ResultsWorker:
         self.shutdown_requested = True
         self.input_middleware.stop_consuming()
 
+    def _should_forward(self, payload: Dict[str, Any]) -> bool:
+        if payload is None:
+            return False
+        if isinstance(payload, dict) and "type" in payload:
+            return True
+        return True
+
     def process_result(self, result: Dict[str, Any]) -> None:
         """Reenvía un resultado individual al gateway."""
+        if isinstance(result, dict) and "transaction_id" in result:
+            self.amount_results += 1
+            logger.debug(
+                "Omitiendo resultado de transaccion individual: %s",
+                result.get("transaction_id"),
+            )
+            return
+
+        if not self._should_forward(result):
+            return
+
         try:
             self.output_middleware.send(result)
             self.result_count += 1
 
-            transaction_id = result.get("transaction_id", "unknown")
-            final_amount = result.get("final_amount", 0)
-            logger.info("Resultado #%s reenviado: %s - $%s", self.result_count, transaction_id, final_amount)
+            logger.info("Resultado #%s reenviado: %s", self.result_count, result.get("type", "payload"))
         except Exception as exc:
             logger.error("Error procesando resultado: %s", exc)
 
     def process_batch(self, batch: List[Dict[str, Any]]) -> None:
         """Procesa un lote de resultados (chunk) y los reenvía al gateway como chunk."""
+        filtered: List[Dict[str, Any]] = []
+        for item in batch:
+            if isinstance(item, dict) and "transaction_id" in item:
+                self.amount_results += 1
+                logger.debug(
+                    "Omitiendo resultado de transaccion individual: %s",
+                    item.get("transaction_id"),
+                )
+                continue
+
+            if self._should_forward(item):
+                filtered.append(item)
+
+        if not filtered:
+            return
+
         try:
-            # Reenviar chunk completo al gateway
-            self.output_middleware.send(batch)
-            logger.info("Procesado chunk de %s resultados", len(batch))
+            # Reenviar chunk filtrado al gateway
+            self.output_middleware.send(filtered)
+            logger.info("Procesado chunk de %s resultados", len(filtered))
         except Exception as exc:
             logger.error("Error procesando chunk de resultados: %s", exc)
+
+    def _emit_amount_summary(self) -> None:
+        try:
+            summary = {
+                "type": "amount_filter_summary",
+                "results_count": self.amount_results,
+            }
+            self.output_middleware.send(summary)
+            logger.info(
+                "Resumen de transacciones filtradas enviado (%s registros)",
+                self.amount_results,
+            )
+        except Exception as exc:
+            logger.error("Error enviando resumen de transacciones filtradas: %s", exc)
 
     def _handle_message(self, message: Any) -> None:
         """Procesa cualquier mensaje recibido desde la cola."""
@@ -101,6 +148,7 @@ class ResultsWorker:
             if self._eof_seen >= self.expected_eof_count:
                 logger.info("Todos los EOF recibidos; reenviando EOF al gateway")
                 try:
+                    self._emit_amount_summary()
                     self.output_middleware.send({"type": "EOF"})
                 finally:
                     self.input_middleware.stop_consuming()

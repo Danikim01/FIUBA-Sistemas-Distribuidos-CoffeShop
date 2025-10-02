@@ -43,8 +43,23 @@ class CoffeeShopGateway:
         # Cola de salida configurable para enviar transacciones
         self.transactions_queue_name = os.getenv('OUTPUT_QUEUE', 'transactions_raw')
         
-        # Cola para enviar stores al enrichment worker
+        # Cola para enviar stores
         self.stores_queue_name = os.getenv('STORES_QUEUE', 'stores_raw')
+        raw_stores_queues = os.getenv('STORES_QUEUES', '')
+        if raw_stores_queues:
+            stores_queue_names = [name.strip() for name in raw_stores_queues.split(',') if name.strip()]
+        else:
+            stores_queue_names = []
+
+        if not stores_queue_names:
+            stores_queue_names = [self.stores_queue_name]
+        elif self.stores_queue_name and self.stores_queue_name not in stores_queue_names:
+            stores_queue_names.insert(0, self.stores_queue_name)
+
+        self.stores_queue_names = stores_queue_names
+
+        # Cola para enviar usuarios a su pipeline
+        self.users_queue_name = os.getenv('USERS_QUEUE', 'users_raw')
 
         # Cola para enviar transaction items a su pipeline
         self.transaction_items_queue_name = os.getenv('TRANSACTION_ITEMS_QUEUE', 'transaction_items_raw')
@@ -65,10 +80,20 @@ class CoffeeShopGateway:
             port=self.rabbitmq_port
         )
         
-        # Middleware para enviar stores al enrichment worker
-        self.stores_queue = RabbitMQMiddlewareQueue(
+        # Middlewares para enviar stores a los pipelines necesarios
+        self.stores_queues = [
+            RabbitMQMiddlewareQueue(
+                host=self.rabbitmq_host,
+                queue_name=queue_name,
+                port=self.rabbitmq_port
+            )
+            for queue_name in self.stores_queue_names
+        ]
+
+        # Middleware para enviar usuarios al pipeline correspondiente
+        self.users_queue = RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
-            queue_name=self.stores_queue_name,
+            queue_name=self.users_queue_name,
             port=self.rabbitmq_port
         )
 
@@ -95,7 +120,8 @@ class CoffeeShopGateway:
 
         logger.info(f"Gateway configurado con RabbitMQ: {self.rabbitmq_host}:{self.rabbitmq_port}")
         logger.info(f"Cola de transacciones: {self.transactions_queue_name}")
-        logger.info(f"Cola de stores: {self.stores_queue_name}")
+        logger.info("Colas de stores: %s", self.stores_queue_names)
+        logger.info(f"Cola de usuarios: {self.users_queue_name}")
         logger.info(f"Cola de transaction items: {self.transaction_items_queue_name}")
         logger.info(f"Cola de menu items: {self.menu_items_queue_name}")
         logger.info(f"Cola de resultados: {self.results_queue_name}")
@@ -193,6 +219,8 @@ class CoffeeShopGateway:
 
                         if newly_marked and data_type == DataType.TRANSACTIONS:
                             self.propagate_transactions_eof()
+                        elif newly_marked and data_type == DataType.USERS:
+                            self.propagate_users_eof()
                         elif newly_marked and data_type == DataType.STORES:
                             self.propagate_stores_eof()
                         elif newly_marked and data_type == DataType.TRANSACTION_ITEMS:
@@ -249,12 +277,20 @@ class CoffeeShopGateway:
                 except Exception as e:
                     logger.error(f"Error enviando chunks a RabbitMQ: {e}")
             elif data_type == DataType.STORES:
-                logger.info(f"Procesando {len(rows)} stores para enriquecimiento")
+                logger.info("Procesando %s stores para pipelines", len(rows))
+                for queue_name, queue in zip(self.stores_queue_names, self.stores_queues):
+                    try:
+                        queue.send(rows)
+                        logger.info("Enviados %s stores a la cola %s", len(rows), queue_name)
+                    except Exception as e:
+                        logger.error("Error enviando stores a RabbitMQ (%s): %s", queue_name, e)
+            elif data_type == DataType.USERS:
+                logger.info("Procesando %s usuarios para pipeline de clientes", len(rows))
                 try:
-                    self.stores_queue.send(rows)
-                    logger.info(f"Enviados {len(rows)} stores al enrichment worker")
+                    self.users_queue.send(rows)
+                    logger.info("Enviados %s usuarios a la cola %s", len(rows), self.users_queue_name)
                 except Exception as e:
-                    logger.error(f"Error enviando stores a RabbitMQ: {e}")
+                    logger.error(f"Error enviando usuarios a RabbitMQ: {e}")
             elif data_type == DataType.TRANSACTION_ITEMS:
                 logger.info(
                     "Procesando %s transaction items con chunking (chunk_size=%s)",
@@ -331,13 +367,22 @@ class CoffeeShopGateway:
         except Exception as exc:
             logger.error(f"Failed to propagate EOF to transactions queue: {exc}")
 
+    def propagate_users_eof(self):
+        """Propaga un mensaje EOF a la cola de usuarios."""
+        try:
+            self.users_queue.send({'type': 'EOF'})
+            logger.info("Propagated EOF to users queue")
+        except Exception as exc:
+            logger.error(f"Failed to propagate EOF to users queue: {exc}")
+
     def propagate_stores_eof(self):
         """Propaga un mensaje EOF a la cola de stores."""
-        try:
-            self.stores_queue.send({'type': 'EOF'})
-            logger.info("Propagated EOF to stores queue")
-        except Exception as exc:
-            logger.error(f"Failed to propagate EOF to stores queue: {exc}")
+        for queue_name, queue in zip(self.stores_queue_names, self.stores_queues):
+            try:
+                queue.send({'type': 'EOF'})
+                logger.info("Propagated EOF to stores queue %s", queue_name)
+            except Exception as exc:
+                logger.error("Failed to propagate EOF to stores queue %s: %s", queue_name, exc)
 
     def propagate_transaction_items_eof(self):
         """Propaga EOF a la cola de transaction items."""

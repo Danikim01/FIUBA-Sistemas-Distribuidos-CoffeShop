@@ -7,6 +7,9 @@
     "gateway": {
       "OUTPUT_QUEUE": "transactions_raw",
       "RESULTS_QUEUE": "gateway_results",
+      "STORES_QUEUE": "stores_raw",
+      "STORES_QUEUES": "stores_raw,stores_for_top_clients",
+      "USERS_QUEUE": "users_raw",
       "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
       "MENU_ITEMS_QUEUE": "menu_items_raw",
       "CHUNK_SIZE": 500
@@ -21,7 +24,8 @@
           "count": 2,
           "environment": {
             "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered"
+            "OUTPUT_QUEUE": "transactions_year_filtered",
+            "OUTPUT_QUEUES": "transactions_year_filtered,transactions_year_for_top_clients"
           }
         }
       ]
@@ -47,6 +51,18 @@
           "environment": {
             "INPUT_QUEUE": "transactions_time_filtered",
             "OUTPUT_QUEUE": "transactions_final_results"
+          }
+        }
+      ]
+    },
+    "transactions_projection": {
+      "prefetch_count": 20,
+      "groups": [
+        {
+          "count": 1,
+          "environment": {
+            "INPUT_QUEUE": "transactions_year_for_top_clients",
+            "OUTPUT_QUEUE": "transactions_compact"
           }
         }
       ]
@@ -89,6 +105,20 @@
         }
       ]
     },
+    "top_clients": {
+      "prefetch_count": 20,
+      "groups": [
+        {
+          "count": 1,
+          "environment": {
+            "TRANSACTIONS_QUEUE": "transactions_compact",
+            "USERS_QUEUE": "users_raw",
+            "STORES_QUEUE": "stores_for_top_clients",
+            "OUTPUT_QUEUE": "transactions_final_results"
+          }
+        }
+      ]
+    },
     "results": {
       "groups": [
         {
@@ -96,7 +126,7 @@
           "environment": {
             "INPUT_QUEUE": "transactions_final_results",
             "OUTPUT_QUEUE": "gateway_results",
-            "EXPECTED_EOF_COUNT": 2
+            "EXPECTED_EOF_COUNT": 4
           }
         }
       ]
