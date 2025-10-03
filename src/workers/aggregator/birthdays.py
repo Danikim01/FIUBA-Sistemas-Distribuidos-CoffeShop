@@ -10,38 +10,35 @@ from typing import Any, DefaultDict, Dict
 from message_utils import extract_client_metadata, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 from worker_utils import run_main, safe_int_conversion
-from workers.utils.base_worker import BaseWorker
+from workers.aggregator.aggregator_worker import AggregatorWorker
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class TopClientsBirthdaysAggregator(BaseWorker):
+class TopClientsBirthdaysAggregator(AggregatorWorker):
     """Aggregates top-client partials and injects client birthdays."""
 
     def __init__(self) -> None:
-        super().__init__()
+        client_queue = os.getenv('CLIENT_DATA_QUEUE', 'client_data_raw').strip()
+        additional_sources = {'client_data': client_queue} if client_queue else {}
+
+        super().__init__(additional_sources)
 
         self._client_counts: DefaultDict[
             str, DefaultDict[int, DefaultDict[int, int]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         self._client_birthdays: DefaultDict[str, Dict[int, str]] = defaultdict(dict)
 
-        self.client_data_queue_name = os.getenv('CLIENT_DATA_QUEUE', 'client_data_raw').strip()
-        self.client_data_middleware: RabbitMQMiddlewareQueue | None = None
+        self.client_data_queue_name = client_queue
+        self.client_data_middleware: RabbitMQMiddlewareQueue | None = (
+            self._aux_middleware.get('client_data') if client_queue else None  # type: ignore[attr-defined]
+        )
         self._client_data_thread: threading.Thread | None = None
+        self._pending_main_eof: tuple[str, Dict[str, Any]] | None = None
 
-        if self.client_data_queue_name:
-            connection_params = {
-                'host': self.config.rabbitmq_host,
-                'port': self.config.rabbitmq_port,
-                'prefetch_count': self.config.prefetch_count,
-            }
-            self.client_data_middleware = RabbitMQMiddlewareQueue(
-                queue_name=self.client_data_queue_name,
-                **connection_params,
-            )
+        if client_queue:
             self._client_data_thread = threading.Thread(
                 target=self._consume_client_data,
                 daemon=True,
@@ -50,7 +47,7 @@ class TopClientsBirthdaysAggregator(BaseWorker):
 
         logger.info(
             "TopClientsBirthdaysAggregator configured (client_data_queue=%s)",
-            self.client_data_queue_name or 'disabled',
+            client_queue or 'disabled',
         )
 
     # ------------------------------------------------------------------
@@ -58,17 +55,12 @@ class TopClientsBirthdaysAggregator(BaseWorker):
     # ------------------------------------------------------------------
 
     def _consume_client_data(self) -> None:
-        assert self.client_data_middleware is not None
+        if not self.client_data_middleware:
+            return
 
-        def on_message(message: Any) -> None:
-            if self.shutdown_requested and self.client_data_middleware:
-                self.client_data_middleware.stop_consuming()
-                return
-
+        def handler(message: Any) -> None:
             if is_eof_message(message):
-                logger.debug("EOF received from client data source: %s", message)
                 return
-
             client_id, actual_data = extract_client_metadata(message)
             if not client_id:
                 logger.warning("Client data message without client_id ignored: %s", message)
@@ -93,10 +85,8 @@ class TopClientsBirthdaysAggregator(BaseWorker):
                 if birthdate:
                     lookup[user_id] = birthdate
 
-        try:
-            self.client_data_middleware.start_consuming(on_message)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Error consuming client data queue: %s", exc)
+        self.start_auxiliary_source('client_data', handler)
+        self._maybe_finalize()
 
     # ------------------------------------------------------------------
     # Main stream processing
@@ -158,6 +148,27 @@ class TopClientsBirthdaysAggregator(BaseWorker):
             logger.warning("EOF received without client_id in TopClientsBirthdaysAggregator")
             return
 
+        self._sources_completed.add('main')  # type: ignore[attr-defined]
+        self._pending_main_eof = (client_id, message)
+        self._maybe_finalize()
+        if self._pending_main_eof is not None:
+            self.input_middleware.stop_consuming()
+
+    def _maybe_finalize(self) -> None:
+        if self._pending_main_eof is None:
+            return
+
+        if not hasattr(self, '_expected_sources'):
+            ready = True
+        else:
+            ready = self._sources_completed >= self._expected_sources  # type: ignore[attr-defined]
+
+        if not ready:
+            return
+
+        client_id, _message = self._pending_main_eof
+        self._pending_main_eof = None
+
         counts_by_store = self._client_counts.pop(client_id, {})
         birthdays = self._client_birthdays.get(client_id, {})
 
@@ -201,6 +212,10 @@ class TopClientsBirthdaysAggregator(BaseWorker):
 
         self.send_eof(client_id=client_id, additional_data={'source': 'top_clients_birthdays'})
         self._client_birthdays.pop(client_id, None)
+        if hasattr(self, '_sources_completed'):
+            self._sources_completed.clear()  # type: ignore[attr-defined]
+
+        self.input_middleware.stop_consuming()
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -208,15 +223,9 @@ class TopClientsBirthdaysAggregator(BaseWorker):
 
     def cleanup(self):
         super().cleanup()
-        if self.client_data_middleware:
-            try:
-                self.client_data_middleware.stop_consuming()
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                self.client_data_middleware.close()
-            except Exception:  # noqa: BLE001
-                pass
+        if self._client_data_thread and self._client_data_thread.is_alive():
+            self.shutdown_requested = True
+            self._client_data_thread.join(timeout=1.0)
 
 if __name__ == '__main__':
     run_main(TopClientsBirthdaysAggregator)
