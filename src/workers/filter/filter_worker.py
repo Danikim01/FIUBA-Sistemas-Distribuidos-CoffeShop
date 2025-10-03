@@ -9,7 +9,7 @@ from worker_config import WorkerConfig
 
 class FilterWorker(BaseWorker):
     """Base class for filter workers that apply filtering logic to messages."""
-        
+
     @abstractmethod
     def apply_filter(self, item: Any) -> bool:
         """Apply filter logic to determine if an item should pass through.
@@ -29,7 +29,7 @@ class FilterWorker(BaseWorker):
             message: Message to process
         """
         if self.apply_filter(message):
-            self.send_message(message, client_id=self.current_client_id)
+            self.send_message(message)
     
     def process_batch(self, batch: List[Any]):
         """Process a batch by filtering and sending filtered results.
@@ -39,4 +39,4 @@ class FilterWorker(BaseWorker):
         """
         filtered_items = [item for item in batch if self.apply_filter(item)]
         if filtered_items:
-            self.send_message(filtered_items, client_id=self.current_client_id)
+            self.send_message(filtered_items)

@@ -118,7 +118,7 @@ class ClientHandler:
             if self.message_handlers.is_eof_message(payload):
                 logger.info(f"Received EOF from results queue for client {client_id}; notifying client")
                 try:
-                    self._send_json_line(client_socket, {'type': 'EOF'})
+                    self._send_json_line(client_socket, {'type': 'EOF', 'client_id': client_id})
                     eof_sent = True
                 except Exception as exc:
                     logger.error(f"Failed to send EOF to client {client_id}: {exc}")
@@ -130,11 +130,8 @@ class ClientHandler:
                 return
             
             try:
-                # Remove client_id from the payload before sending to client
                 result_payload = {k: v for k, v in payload.items() if k != 'client_id'}
 
-                # If there's a nested 'data' section, merge its contents into the top-level payload
-                # Así es como el cliente lo interpreta
                 data_section = result_payload.get('data')
                 if isinstance(data_section, dict):
                     merged_payload = data_section.copy()
@@ -142,6 +139,8 @@ class ClientHandler:
                         if key != 'data' and key not in merged_payload:
                             merged_payload[key] = value
                     result_payload = merged_payload
+
+                result_payload['client_id'] = client_id
 
                 logger.info(f"Gateway sending result to client {client_id}: {result_payload}")
                 self._send_json_line(client_socket, result_payload)
@@ -167,6 +166,6 @@ class ClientHandler:
             results_queue.close()
             if not eof_sent:
                 try:
-                    self._send_json_line(client_socket, {'type': 'EOF'})
+                    self._send_json_line(client_socket, {'type': 'EOF', 'client_id': client_id})
                 except Exception:
                     pass

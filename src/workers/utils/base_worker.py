@@ -96,7 +96,8 @@ class BaseWorker(ABC):
         """
         if self.output_middleware is None:
             raise Exception("Output middleware is not configured")
-        
+        if client_id == '':
+            client_id = self.current_client_id
         message = create_message_with_metadata(client_id, data, **metadata)
         self.output_middleware.send(message)
     
@@ -107,6 +108,8 @@ class BaseWorker(ABC):
             client_id: Client identifier
             additional_data: Additional data to include in EOF message
         """
+        if client_id == '':
+            client_id = self.current_client_id
         eof_data = additional_data or {}
         self.send_message(eof_data, client_id=client_id, type='EOF')
     
@@ -135,7 +138,7 @@ class BaseWorker(ABC):
             message: EOF message dictionary
         """
         # Extract client_id from EOF message
-        client_id = message.get('client_id', '')
+        client_id = message.get('client_id', self.current_client_id)
         data_type = message.get('data_type', '')
         
         logger.info(f"Received EOF for client {client_id}, data_type: {data_type}")
