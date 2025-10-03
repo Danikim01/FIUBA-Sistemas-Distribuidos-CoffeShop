@@ -150,7 +150,7 @@ class ClientHandler:
 
         def on_message(message: Any) -> None:
             try:
-                logger.debug(f"Gateway received message from results queue: {type(message)} - {message}")
+                logger.info(f"Gateway received message from results queue: {type(message)} - {message}")
                 handle_payload(message)
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"Unexpected error forwarding results for client {client_id}: {exc}")

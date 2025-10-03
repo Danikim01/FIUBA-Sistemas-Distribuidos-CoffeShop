@@ -20,6 +20,8 @@ class CoffeeShopGateway:
     def __init__(self):
         # Initialize configuration
         self.config = GatewayConfig()
+
+        logger.setLevel(self.config.log_level)
         
         # Initialize components
         self.queue_manager = QueueManager(self.config)

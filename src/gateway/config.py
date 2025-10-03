@@ -28,6 +28,9 @@ class GatewayConfig:
         
         # Processing configuration
         self.chunk_size = int(os.getenv('CHUNK_SIZE', 100))
+
+        # Logger configuration
+        self.log_level = os.getenv('LOG_LEVEL', 'DEBUG')
     
     def _parse_stores_queues(self) -> List[str]:
         """Parse and validate stores queue names from environment variables."""
