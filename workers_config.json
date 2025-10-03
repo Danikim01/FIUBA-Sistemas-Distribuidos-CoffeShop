@@ -15,7 +15,7 @@
       "CHUNK_SIZE": 5000
     },
     "client": {
-      "GATEWAY_HOST": "localhost",
+      "GATEWAY_HOST": "gateway",
       "GATEWAY_PORT": "12345",
       "BATCH_MAX_SIZE_KB": "64",
       "LOG_LEVEL": "INFO",

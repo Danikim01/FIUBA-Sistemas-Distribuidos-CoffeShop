@@ -55,7 +55,7 @@ class TimeFilterWorker(FilterWorker):
             return self.start_time <= transaction_time <= self.end_time
             
         except Exception as e:
-            logger.debug(f"Error parsing transaction time: {e}")
+            logger.error(f"Error parsing transaction time: {e}")
             return False
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ class YearFilterWorker(FilterWorker):
     Worker que filtra transacciones por año (2024 y 2025).
     Recibe transacciones y las filtra según el año en created_at.
     """
+    
     def _initialize_worker(self):
         """Initialize worker-specific configuration."""
         min_year = int(os.getenv('MIN_YEAR', '2024'))
@@ -37,7 +38,7 @@ class YearFilterWorker(FilterWorker):
             dt = datetime.fromisoformat(created_at)
             return dt.year in (self.min_year, self.max_year)
         except Exception as e:
-            logger.warning(f"No se pudo parsear created_at en item {item}: {e}")
+            logger.error(f"No se pudo parsear created_at en item {item}: {e}")
             return False
 
 if __name__ == "__main__":

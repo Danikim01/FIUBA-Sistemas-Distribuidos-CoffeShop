@@ -9,15 +9,7 @@ from worker_config import WorkerConfig
 
 class FilterWorker(BaseWorker):
     """Base class for filter workers that apply filtering logic to messages."""
-    
-    def __init__(self, config: WorkerConfig):
-        """Initialize filter worker.
         
-        Args:
-            config: Worker configuration instance
-        """
-        super().__init__(config)
-    
     @abstractmethod
     def apply_filter(self, item: Any) -> bool:
         """Apply filter logic to determine if an item should pass through.

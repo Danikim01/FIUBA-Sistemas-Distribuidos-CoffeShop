@@ -239,6 +239,9 @@ class ResultsHandler:
 
         # Allow special control messages to stop consumption
         message_type = result.get('type')
+        if (message_type is None):
+            logger.warning(f"No 'type' field in result: {result}")
+
         if message_type:
             normalized_type = str(message_type).upper()
             if normalized_type == 'EOF':
@@ -278,7 +281,6 @@ class ResultsHandler:
         Returns:
             bool: False when an EOF control message is encountered.
         """
-        logger.info(f"Received message from results stream: {type(message)}")
         try:
             if isinstance(message, list):
                 for item in message:

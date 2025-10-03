@@ -23,9 +23,7 @@ class AmountFilterWorker(FilterWorker):
     
     def _initialize_worker(self):
         """Initialize worker-specific configuration."""
-        # Minimum amount required
         self.min_amount = safe_float_conversion(os.getenv('MIN_AMOUNT', '75.0'))
-        
         logger.info(f"AmountFilterWorker configured with min_amount: {self.min_amount}")
     
     def apply_filter(self, item: Any) -> bool:
@@ -39,11 +37,10 @@ class AmountFilterWorker(FilterWorker):
             bool: True if transaction meets the amount filter
         """
         try:
-            final_amount = item.get('final_amount')
-            final_amount = safe_float_conversion(final_amount)
+            final_amount = safe_float_conversion(item.get('final_amount'))
             return final_amount >= self.min_amount
         except Exception as e:
-            logger.debug(f"Error parsing transaction amount: {e}")
+            logger.error(f"Error parsing transaction amount: {e}")
             return False
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 """Message handling utilities for worker communication."""
 
+import logging
 from typing import Any, Dict, Optional
 
+logger = logging.getLogger(__name__)
 
 def is_eof_message(message: Any) -> bool:
     """Check if a message is an EOF (End Of File) control message.
@@ -57,10 +59,13 @@ def create_message_with_metadata(
         'client_id': client_id,
         'data': data
     }
-    
-    if message_type:
+
+    if message_type is not None:
         message['type'] = message_type
-    
+    elif isinstance(data, dict) and 'type' in data:
+        message['type'] = data['type']
+        logger.debug("Inheriting message type from data: %s", data['type'])
+
     message.update(additional_metadata)
     return message
 

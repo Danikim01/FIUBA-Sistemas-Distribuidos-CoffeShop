@@ -48,7 +48,7 @@ class BaseWorker(ABC):
         if config.has_output_exchange():
             self.output_middleware = RabbitMQMiddlewareExchange(
                 host=config.rabbitmq_host,
-                exchange_name=config.output_exchange,  # type: ignore
+                exchange_name=config.output_exchange,
                 route_keys=[],  # Not needed for fanout
                 exchange_type='fanout',
                 port=config.rabbitmq_port
@@ -94,9 +94,11 @@ class BaseWorker(ABC):
             client_id: Client identifier
             **metadata: Additional metadata fields
         """
-        if self.output_middleware:
-            message = create_message_with_metadata(client_id, data, **metadata)
-            self.output_middleware.send(message)
+        if self.output_middleware is None:
+            raise Exception("Output middleware is not configured")
+        
+        message = create_message_with_metadata(client_id, data, **metadata)
+        self.output_middleware.send(message)
     
     def send_eof(self, client_id: str = '', additional_data: Optional[Dict[str, Any]] = None):
         """Send EOF message to output with client metadata.

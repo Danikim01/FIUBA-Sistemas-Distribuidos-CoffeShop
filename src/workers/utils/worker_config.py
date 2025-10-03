@@ -1,8 +1,6 @@
 """Worker configuration management."""
 
 import os
-from typing import Optional
-
 
 class WorkerConfig:
     """Configuration class for worker settings."""
@@ -19,14 +17,11 @@ class WorkerConfig:
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
         self.input_queue = os.getenv('INPUT_QUEUE', '').strip()
 
-        output_exchange = os.getenv('OUTPUT_EXCHANGE', '')
-        self.output_exchange: Optional[str] = output_exchange.strip() or None
-
-        output_queue = os.getenv('OUTPUT_QUEUE', '')
-        self.output_queue: Optional[str] = output_queue.strip() or None
+        self.output_exchange = os.getenv('OUTPUT_EXCHANGE', '').strip()
+        self.output_queue = os.getenv('OUTPUT_QUEUE', '').strip()
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
-    
+
     def get_rabbitmq_connection_params(self) -> dict:
         """Get RabbitMQ connection parameters.
         
@@ -44,7 +39,7 @@ class WorkerConfig:
         Returns:
             True if output exchange is configured
         """
-        return bool(self.output_exchange)
+        return self.output_exchange != ''
     
     def has_output_queue(self) -> bool:
         """Check if output queue is configured.
@@ -52,7 +47,7 @@ class WorkerConfig:
         Returns:
             True if output queue is configured
         """
-        return bool(self.output_queue)
+        return self.output_queue != ''
     
     def get_output_target(self) -> str:
         """Get the output target name for logging.

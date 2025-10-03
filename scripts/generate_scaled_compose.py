@@ -36,7 +36,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "year_filter": {
         "display_name": "Year Filter Workers",
         "base_service_name": "year-filter-worker",
-        "command": ["python", "year_filter_worker.py"],
+        "command": ["python", "filter/year.py"],
         "needs_worker_id": True,
         "supports_prefetch": True,
         "default_prefetch": 20,
@@ -50,7 +50,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "time_filter": {
         "display_name": "Time Filter Workers",
         "base_service_name": "time-filter-worker",
-        "command": ["python", "time_filter_worker.py"],
+        "command": ["python", "filter/time.py"],
         "needs_worker_id": True,
         "supports_prefetch": True,
         "default_prefetch": 20,
@@ -64,7 +64,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "amount_filter": {
         "display_name": "Amount Filter Workers",
         "base_service_name": "amount-filter-worker",
-        "command": ["python", "amount_filter_worker.py"],
+        "command": ["python", "filter/amount.py"],
         "needs_worker_id": True,
         "supports_prefetch": True,
         "default_prefetch": 20,

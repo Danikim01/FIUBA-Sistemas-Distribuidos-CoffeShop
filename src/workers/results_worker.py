@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import logging
-import signal
-from typing import Any, Dict, List
-from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
+from typing import Any, Dict, List, Optional
+from base_worker import BaseWorker
+from worker_utils import run_main
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -17,109 +16,90 @@ def is_eof_message(message: Any) -> bool:
     return isinstance(message, dict) and str(message.get("type", "")).upper() == "EOF"
 
 
-class ResultsWorker:
+class ResultsWorker(BaseWorker):
     """Worker final que reenvía los resultados procesados hacia el gateway."""
 
-    def __init__(self):
-        self.rabbitmq_host = os.getenv("RABBITMQ_HOST", "localhost")
-        self.rabbitmq_port = int(os.getenv("RABBITMQ_PORT", 5672))
-        self.shutdown_requested = False
-        
-        # Configurar manejo de SIGTERM
-        signal.signal(signal.SIGTERM, self._handle_sigterm)
-        
-        # Colas de entrada y salida configurables por entorno
-        self.input_queue = os.getenv("INPUT_QUEUE", "transactions_final_results")
-        self.output_queue = os.getenv("OUTPUT_QUEUE", "gateway_results")
-
-        # Configuración de prefetch para load balancing
-        self.prefetch_count = int(os.getenv("PREFETCH_COUNT", 10))
-
-        # Número de EOF esperados desde upstream
-        self.expected_eof_count = int(os.getenv("EXPECTED_EOF_COUNT", 1))
+    def _initialize_worker(self):
+        self.expected_eof_count = int(os.getenv("EXPECTED_EOF_COUNT", "1"))
         self._eof_seen = 0
-
-        # Middleware para recibir datos
-        self.input_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.input_queue,
-            port=self.rabbitmq_port,
-        )
-
-        # Middleware para reenviar resultados al gateway
-        self.output_middleware = RabbitMQMiddlewareQueue(
-            host=self.rabbitmq_host,
-            queue_name=self.output_queue,
-            port=self.rabbitmq_port,
-        )
-
-        self.result_count = 0
         self.amount_results = 0
+        self.result_count = 0
 
-        logger.info(
-            "ResultsWorker inicializado - Input: %s, Output: %s",
-            self.input_queue,
-            self.output_queue,
-        )
-
-    def _handle_sigterm(self, signum, frame):
-        """Maneja la señal SIGTERM para terminar ordenadamente"""
-        logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
-        self.shutdown_requested = True
-        self.input_middleware.stop_consuming()
-
-    def _should_forward(self, payload: Dict[str, Any]) -> bool:
-        if payload is None:
+    def _tag_transactions_payload(self, payload: Dict[str, Any]) -> bool:
+        """Detecta listas de transacciones y ajusta metadatos."""
+        data_section = payload.get("data")
+        if not isinstance(data_section, list) or not data_section:
             return False
-        if isinstance(payload, dict) and "type" in payload:
-            return True
+
+        transactions = [item for item in data_section if isinstance(item, dict) and "transaction_id" in item]
+        if not transactions:
+            return False
+
+        self.amount_results += len(transactions)
+        payload.setdefault("type", "amount_filter_transactions")
         return True
 
-    def process_result(self, result: Dict[str, Any]) -> None:
-        """Reenvía un resultado individual al gateway."""
-        if isinstance(result, dict) and "transaction_id" in result:
-            self.amount_results += 1
-            logger.debug(
-                "Omitiendo resultado de transaccion individual: %s",
-                result.get("transaction_id"),
-            )
-            return
-
-        if not self._should_forward(result):
-            return
-
-        try:
-            self.output_middleware.send(result)
-            self.result_count += 1
-
-            logger.info("Resultado #%s reenviado: %s", self.result_count, result.get("type", "payload"))
-        except Exception as exc:
-            logger.error("Error procesando resultado: %s", exc)
-
-    def process_batch(self, batch: List[Dict[str, Any]]) -> None:
-        """Procesa un lote de resultados (chunk) y los reenvía al gateway como chunk."""
-        filtered: List[Dict[str, Any]] = []
-        for item in batch:
-            if isinstance(item, dict) and "transaction_id" in item:
+    def _prepare_payload(self, result: Any) -> Optional[Dict[str, Any]]:
+        """Normaliza el payload asegurando que tenga metadatos correctos."""
+        if isinstance(result, dict):
+            if "transaction_id" in result:
                 self.amount_results += 1
                 logger.debug(
                     "Omitiendo resultado de transaccion individual: %s",
-                    item.get("transaction_id"),
+                    result.get("transaction_id"),
                 )
-                continue
+                return None
 
-            if self._should_forward(item):
-                filtered.append(item)
+            self._tag_transactions_payload(result)
 
-        if not filtered:
+            if "type" not in result:
+                data_section = result.get("data")
+                if isinstance(data_section, dict) and "type" in data_section:
+                    result["type"] = data_section["type"]
+
+            if "type" not in result:
+                result["type"] = "generic_result"
+
+            return result
+
+        if isinstance(result, list):
+            if not result:
+                return None
+
+            transactions = [item for item in result if isinstance(item, dict) and "transaction_id" in item]
+            if transactions:
+                self.amount_results += len(transactions)
+                return {
+                    "type": "amount_filter_transactions",
+                    "data": transactions,
+                }
+
+            return {
+                "type": "batched_results",
+                "data": result,
+            }
+
+        return {
+            "type": "generic_result",
+            "data": result,
+        }
+
+    def process_message(self, message: Any) -> None:
+        """Reenvía un resultado individual al gateway."""
+        payload = self._prepare_payload(message)
+        if payload is None:
             return
 
         try:
-            # Reenviar chunk filtrado al gateway
-            self.output_middleware.send(filtered)
-            logger.info("Procesado chunk de %s resultados", len(filtered))
+            self.send_message(payload)
+            self.result_count += 1
+            logger.info("Resultado #%s reenviado: %s", self.result_count, getattr(payload, "get", lambda *_: "payload")("type", "payload"))
         except Exception as exc:
-            logger.error("Error procesando chunk de resultados: %s", exc)
+            logger.error("Error procesando resultado: %s", exc)
+
+    def process_batch(self, batch: List[Any]) -> None:
+        """Procesa un lote de resultados (chunk) como un único payload."""
+        self.process_message(batch)
 
     def _emit_amount_summary(self) -> None:
         try:
@@ -127,7 +107,7 @@ class ResultsWorker:
                 "type": "amount_filter_summary",
                 "results_count": self.amount_results,
             }
-            self.output_middleware.send(summary)
+            self.send_message(summary)
             logger.info(
                 "Resumen de transacciones filtradas enviado (%s registros)",
                 self.amount_results,
@@ -135,75 +115,21 @@ class ResultsWorker:
         except Exception as exc:
             logger.error("Error enviando resumen de transacciones filtradas: %s", exc)
 
-    def _handle_message(self, message: Any) -> None:
-        """Procesa cualquier mensaje recibido desde la cola."""
-        if is_eof_message(message):
-            self._eof_seen += 1
-            logger.info(
+    def handle_eof(self, message: Dict[str, Any]):
+        self._eof_seen += 1
+        logger.info(
                 "Recibido EOF en ResultsWorker (%s/%s)",
                 self._eof_seen,
                 self.expected_eof_count,
             )
 
-            if self._eof_seen >= self.expected_eof_count:
-                logger.info("Todos los EOF recibidos; reenviando EOF al gateway")
-                try:
-                    self._emit_amount_summary()
-                    self.output_middleware.send({"type": "EOF"})
-                finally:
-                    self.input_middleware.stop_consuming()
-            return
-
-        if isinstance(message, list):
-            self.process_batch(message)
-        else:
-            self.process_result(message)
-
-    def start_consuming(self) -> None:
-        """Inicia el consumo de mensajes de la cola de entrada."""
-        try:
-            logger.info("Iniciando ResultsWorker...")
-
-            def on_message(message: Any) -> None:
-                try:
-                    if self.shutdown_requested:
-                        logger.info("Shutdown requested, stopping message processing")
-                        return
-                        
-                    self._handle_message(message)
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Error en callback de mensaje: %s", exc)
-
-            self.input_middleware.start_consuming(on_message)
-
-        except KeyboardInterrupt:
-            logger.info("ResultsWorker interrumpido por el usuario")
-        except Exception as exc:
-            logger.error("Error iniciando consumo: %s", exc)
-        finally:
-            self.cleanup()
-
-    def cleanup(self) -> None:
-        """Limpia recursos al finalizar."""
-        try:
-            if hasattr(self, 'input_middleware') and self.input_middleware:
-                self.input_middleware.close()
-            if hasattr(self, 'output_middleware') and self.output_middleware:
-                self.output_middleware.close()
-            logger.info("ResultsWorker finalizado - total reenviado: %s", self.result_count)
-        except Exception as exc:
-            logger.warning("Error limpiando recursos: %s", exc)
-
-
-def main() -> None:
-    """Punto de entrada principal."""
-    try:
-        worker = ResultsWorker()
-        worker.start_consuming()
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error en main: %s", exc)
-        sys.exit(1)
-
+        if self._eof_seen >= self.expected_eof_count:
+            logger.info("Todos los EOF recibidos; reenviando EOF al gateway")
+            try:
+                self._emit_amount_summary()
+                self.send_eof()
+            finally:
+                self.input_middleware.stop_consuming()
 
 if __name__ == "__main__":
-    main()
+    run_main(ResultsWorker)
