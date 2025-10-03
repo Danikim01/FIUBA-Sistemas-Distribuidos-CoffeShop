@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
-import pika
+import pika  # type: ignore
+import pika.exceptions  # type: ignore
 import json
 import logging
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Any
 from .middleware_interface import (
     MessageMiddleware, 
     MessageMiddlewareMessageError,
@@ -69,8 +70,8 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
         self.port = port
         self.queue_name = queue_name
         self.prefetch_count = prefetch_count
-        self.connection: Optional[pika.BlockingConnection] = None
-        self.channel: Optional[pika.channel.Channel] = None
+        self.connection: Optional[Any] = None
+        self.channel: Optional[Any] = None
         self.consuming = False
         
         #logger.info(f"Inicializando RabbitMQ Queue Middleware: {host}:{port}/{queue_name}")
@@ -85,7 +86,8 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
                 self.channel = self.connection.channel()
                 
                 # Habilitar confirmaciones de publicación según documentación RabbitMQ
-                self.channel.confirm_delivery()
+                if self.channel:
+                    self.channel.confirm_delivery()
                 
                 #logger.info(f"Conectado a RabbitMQ con confirmaciones: {self.host}:{self.port}")
             except Exception as e:
@@ -102,6 +104,9 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
         """
         try:
             self._ensure_connection()
+            
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No se pudo establecer el canal")
             
             # Declarar la cola (es idempotente)
             self.channel.queue_declare(queue=self.queue_name, durable=False)
@@ -162,6 +167,9 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
         try:
             self._ensure_connection()
             
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No se pudo establecer el canal")
+            
             # Declarar la cola (es idempotente)
             self.channel.queue_declare(queue=self.queue_name, durable=False)
             
@@ -205,9 +213,6 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
             except Exception as e:
                 logger.warning(f"Error deteniendo consumo (normal al cerrar): {e}")
                 # No lanzar excepción en el cierre, es normal que falle
-            except Exception as e:
-                logger.warning(f"Error deteniendo consumo (normal al cerrar): {e}")
-                # No lanzar excepción en el cierre, es normal que falle
     
     def close(self):
         """Cierra la conexión con RabbitMQ."""
@@ -230,6 +235,8 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
         """Elimina la cola."""
         try:
             self._ensure_connection()
+            if not self.channel:
+                raise MessageMiddlewareDeleteError("No se pudo establecer el canal")
             self.channel.queue_delete(queue=self.queue_name)
             #logger.info(f"Cola '{self.queue_name}' eliminada")
         except Exception as e:
@@ -261,8 +268,8 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
         self.exchange_name = exchange_name
         self.route_keys = route_keys
         self.exchange_type = exchange_type
-        self.connection: Optional[pika.BlockingConnection] = None
-        self.channel: Optional[pika.channel.Channel] = None
+        self.connection: Optional[Any] = None
+        self.channel: Optional[Any] = None
         self.consuming = False
         self.queue_name: Optional[str] = None
         
@@ -278,7 +285,8 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
                 self.channel = self.connection.channel()
                 
                 # Habilitar confirmaciones de publicación según documentación RabbitMQ
-                self.channel.confirm_delivery()
+                if self.channel:
+                    self.channel.confirm_delivery()
                 
                 #logger.info(f"Conectado a RabbitMQ con confirmaciones: {self.host}:{self.port}")
             except Exception as e:
@@ -296,6 +304,9 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
         try:
             self._ensure_connection()
             
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No se pudo establecer el canal")
+            
             # Declarar el exchange
             self.channel.exchange_declare(
                 exchange=self.exchange_name,
@@ -307,14 +318,23 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
             result = self.channel.queue_declare(queue='', exclusive=True)
             self.queue_name = result.method.queue
             
-            # Bindear la cola a cada routing key
-            for route_key in self.route_keys:
+            # Bindear la cola al exchange
+            if self.exchange_type == 'fanout':
+                # Para fanout, no se necesitan routing keys
                 self.channel.queue_bind(
                     exchange=self.exchange_name,
-                    queue=self.queue_name,
-                    routing_key=route_key
+                    queue=self.queue_name
                 )
-                #logger.info(f"Cola '{self.queue_name}' bindeada a '{route_key}'")
+                #logger.info(f"Cola '{self.queue_name}' bindeada al exchange fanout '{self.exchange_name}'")
+            else:
+                # Para otros tipos de exchange, usar routing keys
+                for route_key in self.route_keys:
+                    self.channel.queue_bind(
+                        exchange=self.exchange_name,
+                        queue=self.queue_name,
+                        routing_key=route_key
+                    )
+                    #logger.info(f"Cola '{self.queue_name}' bindeada a '{route_key}'")
             
             # Configurar el consumidor (simplificado para Exchanges)
             def callback(ch, method, properties, body):
@@ -356,16 +376,19 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
             #logger.error(f"Error iniciando consumo: {e}")
             raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {e}")
     
-    def send(self, message, routing_key: str = None):
+    def send(self, message, routing_key: str = ''):
         """
         Envía un mensaje al exchange con Publisher Confirms según documentación RabbitMQ.
         
         Args:
             message: Mensaje a enviar
-            routing_key: Routing key para el mensaje (opcional)
+            routing_key: Routing key para el mensaje (ignorado en fanout exchanges)
         """
         try:
             self._ensure_connection()
+            
+            if not self.channel:
+                raise MessageMiddlewareDisconnectedError("No se pudo establecer el canal")
             
             # Declarar el exchange
             self.channel.exchange_declare(
@@ -377,8 +400,11 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
             # Serializar el mensaje manualmente
             message_body = serialize_message(message)
             
-            # Usar la primera routing key si no se especifica una
-            if routing_key is None:
+            # Para fanout exchanges, routing_key se ignora
+            if self.exchange_type == 'fanout':
+                routing_key = ''
+            elif routing_key == '':
+                # Usar la primera routing key si no se especifica una y no es fanout
                 routing_key = self.route_keys[0] if self.route_keys else ''
             
             # Enviar el mensaje con confirmación
@@ -442,6 +468,8 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
         """Elimina el exchange."""
         try:
             self._ensure_connection()
+            if not self.channel:
+                raise MessageMiddlewareDeleteError("No se pudo establecer el canal")
             self.channel.exchange_delete(exchange=self.exchange_name)
             #logger.info(f"Exchange '{self.exchange_name}' eliminado")
         except Exception as e:
