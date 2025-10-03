@@ -106,7 +106,9 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
             try:
                 store_id = safe_int_conversion(entry.get('store_id'))
                 user_id = safe_int_conversion(entry.get('user_id'))
-                purchases_qty = safe_int_conversion(entry.get('purchases_qty'))
+                purchases_qty = safe_int_conversion(
+                    entry.get('purchases_qty') or entry.get('purchase_qty')
+                )
             except Exception:  # noqa: BLE001
                 logger.debug("Invalid partial entry skipped: %s", entry)
                 continue
