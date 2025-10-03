@@ -30,8 +30,7 @@
           "count": 2,
           "environment": {
             "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUES": "transactions_year_filtered,transactions_year_for_top_clients"
+            "OUTPUT_QUEUE": "transactions_year_filtered"
           }
         }
       ]
@@ -43,8 +42,7 @@
           "count": 2,
           "environment": {
             "INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_time_filtered",
-            "OUTPUT_QUEUES": "transactions_time_filtered,transactions_time_filtered_tpv"
+            "OUTPUT_QUEUE": "transactions_time_filtered"
           }
         }
       ]

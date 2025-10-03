@@ -41,8 +41,4 @@ class YearFilterWorker(FilterWorker):
             return False
 
 if __name__ == "__main__":
-    config = WorkerConfig(
-        input_queue='transactions_year_filtered',
-        output_queue='transactions_time_filtered'
-    )
-    run_main(YearFilterWorker, config)
+    run_main(YearFilterWorker)

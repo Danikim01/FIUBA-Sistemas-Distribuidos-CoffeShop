@@ -4,13 +4,15 @@ import sys
 import logging
 from typing import Any, Optional
 from datetime import datetime
+from worker_config import WorkerConfig
 
 logger = logging.getLogger(__name__)
 
 
 def run_main(worker_class, *args, **kwargs):
     try:
-        worker = worker_class(*args, **kwargs)
+        config = WorkerConfig()
+        worker = worker_class(config, *args, **kwargs)
         worker.start_consuming()
     except Exception as e:
         logger.error(f"Error in main: {e}")

@@ -7,12 +7,7 @@ from typing import Optional
 class WorkerConfig:
     """Configuration class for worker settings."""
     
-    def __init__(
-        self,
-        input_queue: str,
-        output_exchange: Optional[str] = None,
-        output_queue: Optional[str] = None
-    ):
+    def __init__( self ):
         """Initialize worker configuration.
         
         Args:
@@ -22,9 +17,14 @@ class WorkerConfig:
         """
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
-        self.input_queue = input_queue
-        self.output_exchange = output_exchange
-        self.output_queue = output_queue
+        self.input_queue = os.getenv('INPUT_QUEUE', '').strip()
+
+        output_exchange = os.getenv('OUTPUT_EXCHANGE', '')
+        self.output_exchange: Optional[str] = output_exchange.strip() or None
+
+        output_queue = os.getenv('OUTPUT_QUEUE', '')
+        self.output_queue: Optional[str] = output_queue.strip() or None
+
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
     
     def get_rabbitmq_connection_params(self) -> dict:
@@ -44,7 +44,7 @@ class WorkerConfig:
         Returns:
             True if output exchange is configured
         """
-        return self.output_exchange is not None
+        return bool(self.output_exchange)
     
     def has_output_queue(self) -> bool:
         """Check if output queue is configured.
@@ -52,7 +52,7 @@ class WorkerConfig:
         Returns:
             True if output queue is configured
         """
-        return self.output_queue is not None
+        return bool(self.output_queue)
     
     def get_output_target(self) -> str:
         """Get the output target name for logging.

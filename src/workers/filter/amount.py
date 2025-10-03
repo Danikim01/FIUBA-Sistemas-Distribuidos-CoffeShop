@@ -46,21 +46,5 @@ class AmountFilterWorker(FilterWorker):
             logger.debug(f"Error parsing transaction amount: {e}")
             return False
 
-
-def main():
-    """Main entry point."""
-    config = WorkerConfig(
-        input_queue='transactions_time_filtered',
-        output_queue='transactions_final_results'
-    )
-    
-    worker = AmountFilterWorker(config)
-    worker.start_consuming()
-
-
 if __name__ == "__main__":
-    config = WorkerConfig(
-            input_queue='transactions_time_filtered',
-            output_queue='transactions_final_results'
-        )
-    run_main(AmountFilterWorker, config)
+    run_main(AmountFilterWorker)
