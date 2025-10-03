@@ -4,7 +4,7 @@ import os
 import logging
 from typing import Any
 from datetime import time
-from worker_utils import FilterWorker, WorkerConfig, create_worker_main, extract_time_safe
+from worker_utils import FilterWorker, extract_time_safe, create_worker_main, WorkerConfig
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,11 +61,10 @@ class TimeFilterWorker(FilterWorker):
 def main():
     """Main entry point."""
     config = WorkerConfig(
-        input_queue_default='transactions_enriched',
-        output_queue_default='transactions_time_filtered',
-        prefetch_count_default=10
+        input_queue='transactions_year_filtered',
+        output_queue='transactions_time_filtered'
     )
-    
+
     worker = TimeFilterWorker(config)
     worker.start_consuming()
 
@@ -75,9 +74,8 @@ if __name__ == "__main__":
     main_func = create_worker_main(
         TimeFilterWorker,
         WorkerConfig(
-            input_queue_default='transactions_enriched',
-            output_queue_default='transactions_time_filtered',
-            prefetch_count_default=10
+            input_queue='transactions_year_filtered',
+            output_queue='transactions_time_filtered'
         )
     )
     main_func()

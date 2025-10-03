@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from typing import Any, Dict, List
 
-from base_worker import BaseWorker
+from workers.utils.base_worker import BaseWorker
 from worker_config import WorkerConfig
 
 

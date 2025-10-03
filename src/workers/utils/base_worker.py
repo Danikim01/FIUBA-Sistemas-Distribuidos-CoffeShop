@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue, RabbitMQMiddlewareExchange
-from .worker_config import WorkerConfig
-from .message_utils import (
+from worker_config import WorkerConfig
+from message_utils import (
     is_eof_message,
     extract_client_metadata,
     create_message_with_metadata,

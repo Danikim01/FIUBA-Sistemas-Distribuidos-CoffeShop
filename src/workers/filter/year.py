@@ -7,12 +7,13 @@ import signal
 from typing import Any
 from datetime import datetime
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
+from filter_worker import FilterWorker
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-class YearFilterWorker:
+class YearFilterWorker(FilterWorker):
     """
     Worker que filtra transacciones por año (2024 y 2025).
     Recibe transacciones y las filtra según el año en created_at.
