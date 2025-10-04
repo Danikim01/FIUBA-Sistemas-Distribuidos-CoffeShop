@@ -82,6 +82,15 @@ class BaseWorker(ABC):
         """
         pass
 
+    # overwritten by top worker
+    def handle_eof(self, message: Dict[str, Any]):
+        """Handle EOF message. Can be overridden by subclasses.
+        
+        Args:
+            message: EOF message dictionary
+        """
+        self.eof_handler.handle_eof(message, self.current_client_id)
+
     def start_consuming(self):
         """Start consuming messages from the input queue."""
         try:
@@ -97,7 +106,7 @@ class BaseWorker(ABC):
                         return
                     
                     if is_eof_message(message):
-                        self.eof_handler.handle_eof(message, self.current_client_id)
+                        self.handle_eof(message)
                         return
                     
                     client_id, actual_data = extract_client_metadata(message)

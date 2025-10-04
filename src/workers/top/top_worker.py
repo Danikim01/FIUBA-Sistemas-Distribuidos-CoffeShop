@@ -23,20 +23,18 @@ class TopWorker(BaseWorker):
         pass
 
     def handle_eof(self, message: Dict[str, Any]):
-        client_id = message.get('client_id') or self.current_client_id
-        if not client_id:
-            logger.warning("EOF received without client_id")
-            return
-        
-        payload = self.create_payload(client_id)
-        self.send_message(payload, client_id=client_id)
-        logger.info(
-            "%s emitted results for client %s",
-            self.__class__.__name__,
-            client_id,
-        )
+        client_id = message.get('client_id', self.current_client_id)
 
-        self.output_eof(client_id=client_id)
+        def callback():
+            payload = self.create_payload(client_id)
+            self.send_message(payload, client_id=client_id)
+            logger.info(
+                "%s emitted results for client %s",
+                self.__class__.__name__,
+                client_id,
+            )
+        
+        self.eof_handler.handle_eof(message, client_id, callback=callback)
 
     def process_message(self, message: dict):
         client_id = self.current_client_id or message.get('client_id', '')

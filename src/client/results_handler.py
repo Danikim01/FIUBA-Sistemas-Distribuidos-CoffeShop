@@ -92,7 +92,10 @@ class ResultsHandler:
             with file_path.open("a", encoding="utf-8") as file_handle:
                 for line in body_lines:
                     file_handle.write(f"{line}\n")
-            logger.info("Resultados escritos en %s", file_path)
+            # Log the file path for all files except the amount filter
+            # Too many lines in that one
+            if (filename != "amount_filter_transactions.txt"):
+                logger.info("Resultados escritos en %s", file_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("No se pudieron escribir resultados en %s: %s", file_path, exc)
 
