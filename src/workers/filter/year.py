@@ -80,5 +80,13 @@ class YearFilterWorker(FilterWorker):
             except Exception:  # noqa: BLE001
                 pass
 
+    def handle_eof(self, message: dict[str, Any]):
+        if self.secondary_output:
+            try:
+                self.secondary_output.send(message)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to forward EOF to secondary queue: %s", exc)
+        super().handle_eof(message)
+
 if __name__ == "__main__":
     run_main(YearFilterWorker)
