@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue, RabbitMQMiddlewareExchange
-from worker_config import WorkerConfig
+from middleware_config import MiddlewareConfig
 from message_utils import (
     is_eof_message,
     extract_client_metadata,
@@ -26,9 +26,8 @@ class BaseWorker(ABC):
     def __init__(self):
         """Initialize base worker.
         """
-        config = WorkerConfig()
+        config = MiddlewareConfig()
 
-        self.config = config
         self.shutdown_requested = False
         self.current_client_id = ''  # Track current client being processed
         
@@ -36,31 +35,11 @@ class BaseWorker(ABC):
         signal.signal(signal.SIGTERM, self._handle_sigterm)
         
         # Setup input middleware
-        self.input_middleware = RabbitMQMiddlewareQueue(
-            host=config.rabbitmq_host,
-            queue_name=config.input_queue,
-            port=config.rabbitmq_port,
-            prefetch_count=config.prefetch_count
-        )
-        
-        # Setup output middleware (fanout exchange or direct queue)
-        if config.has_output_exchange():
-            self.output_middleware = RabbitMQMiddlewareExchange(
-                host=config.rabbitmq_host,
-                exchange_name=config.output_exchange,
-                route_keys=[],  # Not needed for fanout
-                exchange_type='fanout',
-                port=config.rabbitmq_port
-            )
-        elif config.has_output_queue():
-            self.output_middleware = RabbitMQMiddlewareQueue(
-                host=config.rabbitmq_host,
-                queue_name=config.output_queue,  # type: ignore
-                port=config.rabbitmq_port
-            )
-        else:
-            self.output_middleware = None
-        
+        self.input_middleware = config.get_input_queue()
+        self.output_middleware = config.get_output_middleware()
+
+        self.input_middleware
+
         logger.info(
             "%s initialized - Input: %s, Output: %s",
             self.__class__.__name__,

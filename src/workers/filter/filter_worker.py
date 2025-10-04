@@ -4,7 +4,6 @@ from abc import abstractmethod
 from typing import Any, List
 
 from workers.utils.base_worker import BaseWorker
-from worker_config import WorkerConfig
 
 
 class FilterWorker(BaseWorker):

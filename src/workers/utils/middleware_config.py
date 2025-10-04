@@ -1,8 +1,11 @@
 """Worker configuration management."""
 
 import os
+from typing import Union
 
-class WorkerConfig:
+from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
+
+class MiddlewareConfig:
     """Configuration class for worker settings."""
     
     def __init__( self ):
@@ -22,16 +25,30 @@ class WorkerConfig:
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
 
-    def get_rabbitmq_connection_params(self) -> dict:
-        """Get RabbitMQ connection parameters.
         
-        Returns:
-            Dictionary containing connection parameters
-        """
-        return {
-            'host': self.rabbitmq_host,
-            'port': self.rabbitmq_port
-        }
+    def get_input_queue(self) -> RabbitMQMiddlewareQueue:
+        return RabbitMQMiddlewareQueue(
+            host=self.rabbitmq_host,
+            queue_name=self.input_queue,
+            port=self.rabbitmq_port,
+            prefetch_count=self.prefetch_count
+        )
+
+    def get_output_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
+        if self.has_output_exchange():
+            return RabbitMQMiddlewareExchange(
+                host=self.rabbitmq_host,
+                exchange_name=self.output_exchange,
+                route_keys=[],  # Not needed for fanout
+                exchange_type='fanout',
+                port=self.rabbitmq_port
+            )
+        
+        return RabbitMQMiddlewareQueue(
+                host=self.rabbitmq_host,
+                queue_name=self.output_queue,
+                port=self.rabbitmq_port
+            )
     
     def has_output_exchange(self) -> bool:
         """Check if output exchange is configured.
@@ -39,15 +56,7 @@ class WorkerConfig:
         Returns:
             True if output exchange is configured
         """
-        return self.output_exchange != ''
-    
-    def has_output_queue(self) -> bool:
-        """Check if output queue is configured.
-        
-        Returns:
-            True if output queue is configured
-        """
-        return self.output_queue != ''
+        return self.output_exchange is not None and self.output_exchange != ''
     
     def get_output_target(self) -> str:
         """Get the output target name for logging.

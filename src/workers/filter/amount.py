@@ -6,7 +6,6 @@ import os
 import logging
 from typing import Any
 
-from worker_config import WorkerConfig
 from worker_utils import run_main, safe_float_conversion
 from workers.filter.filter_worker import FilterWorker
 

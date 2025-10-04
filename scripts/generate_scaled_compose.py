@@ -43,9 +43,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_environment": {
             "INPUT_QUEUE": "transactions_raw",
             "OUTPUT_QUEUE": "transactions_year_filtered",
-            "SECONDARY_OUTPUT_QUEUE": "transactions_filtered_by_year",
+            "OUTPUT_EXCHANGE": "transactions_year_filtered",
         },
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE", "SECONDARY_OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "time_filter": {
@@ -57,9 +57,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "default_prefetch": 20,
         "default_environment": {
             "INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_time_filtered",
+            "OUTPUT_EXCHANGE": "transactions_time_filtered",
         },
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE"],
         "scalable": True,
     },
     "amount_filter": {

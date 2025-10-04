@@ -4,7 +4,7 @@ import sys
 import logging
 from typing import Any, Optional
 from datetime import datetime
-from worker_config import WorkerConfig
+from middleware_config import MiddlewareConfig
 
 logger = logging.getLogger(__name__)
 
