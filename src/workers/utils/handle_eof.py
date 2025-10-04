@@ -10,6 +10,7 @@ Counter = Dict[int, int]  # [worker_id, count]
 
 class EOFHandler:
     def __init__(self, middleware_config: MiddlewareConfig):
+        self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '5'))
         self.worker_id: int = int(os.getenv('WORKER_ID', '0'), 0)
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'), 1)
         self.middleware_config = middleware_config
@@ -23,15 +24,30 @@ class EOFHandler:
         client_id = message.get('client_id', current_client_id)
         
         additional_data: Dict[str, Any] = extract_eof_metadata(message)
+        counter: Counter = additional_data.get('counter', {})
 
-        if not additional_data or additional_data.get('counter') is None:
-            additional_data = {'counter': {self.worker_id: 1}}
-        elif self.worker_id in additional_data['counter']:
-            additional_data['counter'][self.worker_id] += 1
+        if counter.get(self.worker_id) is None:
+            counter[self.worker_id] = 0
+        counter[self.worker_id] += 1
+
+        if self.should_output(counter):
+            self.output_eof(client_id=client_id)
         else:
-            additional_data['counter'][self.worker_id] = 1
+            self.requeue_eof(client_id=client_id, counter=counter)
 
-        self.output_eof(client_id=client_id)
+    def should_output(self, counter: Counter) -> bool:
+        """Determine if EOF should be output based on counter.
+
+        Args:
+            counter: Dictionary tracking how many workers have processed the EOF
+        Returns:
+            True if EOF should be output, False otherwise
+        """
+        if len(counter) >= self.replica_count:
+            return True
+        if any(count >= self.max_retries for count in counter.values()):
+            return True
+        return False
 
     def output_eof(self, client_id: ClientId):
         """Send EOF message to output with client metadata.
