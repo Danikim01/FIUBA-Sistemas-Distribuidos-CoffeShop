@@ -69,7 +69,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
         "base_service_name": "tpv-aggregator",
-        "command": ["python", "aggregator/tpv.py"],
+        "command": ["python", "aggregator/final_tvp.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
@@ -85,7 +85,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
         "base_service_name": "items-aggregator",
-        "command": ["python", "aggregator/items.py"],
+        "command": ["python", "aggregator/final_items.py"],
         "needs_worker_id": False,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
@@ -103,7 +103,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "top-clients-birthdays-aggregator",
         "command": ["python", "aggregator/birthdays.py"],
         "needs_worker_id": False,
-        "required_environment": ["INPUT_QUEUE", "CLIENT_DATA_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
 }
@@ -393,6 +393,7 @@ def generate_worker_sections(
             environment.update(worker_cfg.environment)
             if global_prefetch is not None and "PREFETCH_COUNT" not in environment:
                 environment["PREFETCH_COUNT"] = global_prefetch
+            environment.setdefault("REPLICA_COUNT", str(total_count))
             if meta["needs_worker_id"]:
                 environment["WORKER_ID"] = str(index)
 

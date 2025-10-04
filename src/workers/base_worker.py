@@ -1,15 +1,16 @@
 """Base worker class providing common functionality for all workers."""
 
 import logging
+import os
 import signal
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+from handle_eof import EOFHandler
 from middleware_config import MiddlewareConfig
 from message_utils import (
     is_eof_message,
     extract_client_metadata,
     create_message_with_metadata,
-    extract_eof_metadata
 )
 
 logger = logging.getLogger(__name__)
@@ -23,14 +24,14 @@ class BaseWorker(ABC):
     def __init__(self):
         """Initialize base worker.
         """
-
-        self.shutdown_requested = False
-        self.current_client_id = ''  # Track current client being processed
-        
         # Configure SIGTERM handling
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
+        self.shutdown_requested = False
+        self.current_client_id = ''  # Track current client being processed
+
         self.middleware_config = MiddlewareConfig()
+        self.eof_handler = EOFHandler(self.middleware_config)
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
@@ -63,18 +64,6 @@ class BaseWorker(ABC):
         message = create_message_with_metadata(client_id, data, **metadata)
         self.middleware_config.output_middleware.send(message)
     
-    def send_eof(self, client_id: str = '', additional_data: Optional[Dict[str, Any]] = None):
-        """Send EOF message to output with client metadata.
-        
-        Args:
-            client_id: Client identifier
-            additional_data: Additional data to include in EOF message
-        """
-        if client_id == '':
-            client_id = self.current_client_id
-        eof_data = additional_data or {}
-        self.send_message(eof_data, client_id=client_id, type='EOF')
-    
     @abstractmethod
     def process_message(self, message: Any):
         """Process a single message. Must be implemented by subclasses.
@@ -92,24 +81,7 @@ class BaseWorker(ABC):
             batch: List of messages to process
         """
         pass
-    
-    def handle_eof(self, message: Dict[str, Any]):
-        """Handle EOF message. Can be overridden by subclasses.
-        
-        Args:
-            message: EOF message dictionary
-        """
-        # Extract client_id from EOF message
-        client_id = message.get('client_id', self.current_client_id)
-        data_type = message.get('data_type', '')
-        
-        logger.info(f"Received EOF for client {client_id}, data_type: {data_type}")
-        
-        # Forward EOF with client metadata
-        additional_data = extract_eof_metadata(message)
-        self.send_eof(client_id=client_id, additional_data=additional_data)
-        self.middleware_config.input_middleware.stop_consuming()
-    
+
     def start_consuming(self):
         """Start consuming messages from the input queue."""
         try:
@@ -125,13 +97,10 @@ class BaseWorker(ABC):
                         return
                     
                     if is_eof_message(message):
-                        self.handle_eof(message)
+                        self.eof_handler.handle_eof(message, self.current_client_id)
                         return
                     
-                    # Extract client metadata
                     client_id, actual_data = extract_client_metadata(message)
-                    
-                    # Store client_id for use in response methods
                     self.current_client_id = client_id
 
                     logger.info(f"Processing message for client {client_id}")

@@ -36,7 +36,7 @@ class TopWorker(BaseWorker):
             client_id,
         )
 
-        self.send_eof(client_id=client_id)
+        self.output_eof(client_id=client_id)
 
     def process_message(self, message: dict):
         client_id = self.current_client_id or message.get('client_id', '')
