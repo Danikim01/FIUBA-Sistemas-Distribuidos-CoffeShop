@@ -27,40 +27,36 @@ class MiddlewareConfig:
 
         self.prefetch_count = int(os.getenv('PREFETCH_COUNT', '10'))
 
-        
-    def get_input_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
+        self.input_middleware = self._create_input_middleware()
+        self.output_middleware = self._create_output_middleware()
+
+    def _create_input_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
         if self.has_input_exchange():
-            return RabbitMQMiddlewareExchange(
-                host=self.rabbitmq_host,
-                exchange_name=self.input_exchange,
-                route_keys=[self.input_exchange],
-                exchange_type='direct',
-                port=self.rabbitmq_port
-            )
-        
+            return self.create_exchange(self.input_exchange)
+        return self.create_queue(self.input_queue)
+
+    def _create_output_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
+        if self.has_output_exchange():
+            return self.create_exchange(self.output_exchange)
+        return self.create_queue(self.output_queue)
+
+    def create_exchange(self, name: str) -> RabbitMQMiddlewareExchange:
+        return RabbitMQMiddlewareExchange(
+            host=self.rabbitmq_host,
+            exchange_name=name,
+            route_keys=[name],
+            exchange_type='direct',
+            port=self.rabbitmq_port
+        )
+
+    def create_queue(self, name: str) -> RabbitMQMiddlewareQueue:
         return RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
-            queue_name=self.input_queue,
+            queue_name=name,
             port=self.rabbitmq_port,
             prefetch_count=self.prefetch_count
         )
 
-    def get_output_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
-        if self.has_output_exchange():
-            return RabbitMQMiddlewareExchange(
-                host=self.rabbitmq_host,
-                exchange_name=self.output_exchange,
-                route_keys=[self.output_exchange],
-                exchange_type='direct',
-                port=self.rabbitmq_port
-            )
-        
-        return RabbitMQMiddlewareQueue(
-                host=self.rabbitmq_host,
-                queue_name=self.output_queue,
-                port=self.rabbitmq_port
-            )
-    
     def get_input_target(self) -> str:
         if self.has_input_exchange():
             return f"exchange:{self.input_exchange}"
@@ -77,3 +73,9 @@ class MiddlewareConfig:
     def has_output_exchange(self) -> bool:
         return self.output_exchange != ''
     
+    def cleanup(self) -> None:
+        """Clean up middleware connections."""
+        if self.input_middleware:
+            self.input_middleware.close()
+        if self.output_middleware:
+            self.output_middleware.close()

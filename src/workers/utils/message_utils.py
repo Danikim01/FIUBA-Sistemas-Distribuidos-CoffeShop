@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+ClientId = str
+
 def is_eof_message(message: Any) -> bool:
     """Check if a message is an EOF (End Of File) control message.
     

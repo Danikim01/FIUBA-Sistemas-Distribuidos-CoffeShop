@@ -17,14 +17,11 @@ class GatewayConfig:
         
         # Queue names
         self.transactions_queue_name = os.getenv('OUTPUT_QUEUE', 'transactions_raw')
-        self.stores_queue_name = os.getenv('STORES_QUEUE', 'stores_raw')
+        self.stores_exchange_name = os.getenv('STORES_EXCHANGE', 'stores_raw')
         self.users_queue_name = os.getenv('USERS_QUEUE', 'users_raw')
         self.transaction_items_queue_name = os.getenv('TRANSACTION_ITEMS_QUEUE', 'transaction_items_raw')
         self.menu_items_queue_name = os.getenv('MENU_ITEMS_QUEUE', 'menu_items_raw')
         self.results_queue_name = os.getenv('RESULTS_QUEUE', 'gateway_results')
-        
-        # Multiple stores queues configuration
-        self.stores_queue_names = self._parse_stores_queues()
         
         # Processing configuration
         self.chunk_size = int(os.getenv('CHUNK_SIZE', 100))
@@ -42,9 +39,9 @@ class GatewayConfig:
             stores_queue_names = []
 
         if not stores_queue_names:
-            stores_queue_names = [self.stores_queue_name]
-        elif self.stores_queue_name and self.stores_queue_name not in stores_queue_names:
-            stores_queue_names.insert(0, self.stores_queue_name)
+            stores_queue_names = [self.stores_exchange_name]
+        elif self.stores_exchange_name and self.stores_exchange_name not in stores_queue_names:
+            stores_queue_names.insert(0, self.stores_exchange_name)
 
         return stores_queue_names
     

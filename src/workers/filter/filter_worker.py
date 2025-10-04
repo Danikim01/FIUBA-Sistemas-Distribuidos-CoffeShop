@@ -2,9 +2,7 @@
 
 from abc import abstractmethod
 from typing import Any, List
-
 from workers.base_worker import BaseWorker
-
 
 class FilterWorker(BaseWorker):
     """Base class for filter workers that apply filtering logic to messages."""

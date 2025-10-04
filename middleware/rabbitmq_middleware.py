@@ -226,9 +226,9 @@ class RabbitMQMiddlewareQueue(MessageMiddleware):
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
                 
-            #logger.info(f"Desconectado de RabbitMQ: {self.host}:{self.port}")
+            logger.info(f"Desconectado de RabbitMQ: {self.host}:{self.port}")
         except Exception as e:
-            #logger.warning(f"Error cerrando conexión: {e}")
+            logger.warning(f"Error cerrando conexión: {e}")
             pass
     
     def delete(self):
@@ -459,9 +459,9 @@ class RabbitMQMiddlewareExchange(MessageMiddleware):
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
                 
-            #logger.info(f"Desconectado de RabbitMQ: {self.host}:{self.port}")
+            logger.info(f"Desconectado de RabbitMQ: {self.host}:{self.port}")
         except Exception as e:
-            #logger.warning(f"Error cerrando conexión: {e}")
+            logger.warning(f"Error cerrando conexión: {e}")
             pass
     
     def delete(self):

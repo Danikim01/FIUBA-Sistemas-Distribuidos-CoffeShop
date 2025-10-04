@@ -27,15 +27,6 @@ class AmountFilterWorker(FilterWorker):
         logger.info(f"AmountFilterWorker configured with min_amount: {self.min_amount}")
     
     def apply_filter(self, item: Any) -> bool:
-        """
-        Filter a transaction by amount (>= 75).
-        
-        Args:
-            item: Dictionary with transaction data
-            
-        Returns:
-            bool: True if transaction meets the amount filter
-        """
         try:
             final_amount = safe_float_conversion(item.get('final_amount'))
             return final_amount >= self.min_amount

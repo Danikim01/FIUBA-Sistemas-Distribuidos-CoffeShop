@@ -29,16 +29,14 @@ class BaseWorker(ABC):
         
         # Configure SIGTERM handling
         signal.signal(signal.SIGTERM, self._handle_sigterm)
-        
-        middleware_config = MiddlewareConfig()
-        self.input_middleware = middleware_config.get_input_middleware()
-        self.output_middleware = middleware_config.get_output_middleware()
+
+        self.middleware_config = MiddlewareConfig()
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
             self.__class__.__name__,
-            middleware_config.get_input_target(),
-            middleware_config.get_output_target()
+            self.middleware_config.get_input_target(),
+            self.middleware_config.get_output_target()
         )
     
     def _handle_sigterm(self, signum, frame):
@@ -49,7 +47,7 @@ class BaseWorker(ABC):
             frame: Current stack frame
         """
         logger.info("SIGTERM received, initiating graceful shutdown...", signum, frame)
-        self.input_middleware.stop_consuming()
+        self.middleware_config.input_middleware.stop_consuming()
         self.shutdown_requested = True
     
     def send_message(self, data: Any, client_id: str = '', **metadata):
@@ -60,12 +58,10 @@ class BaseWorker(ABC):
             client_id: Client identifier
             **metadata: Additional metadata fields
         """
-        if self.output_middleware is None:
-            raise Exception("Output middleware is not configured")
         if client_id == '':
             client_id = self.current_client_id
         message = create_message_with_metadata(client_id, data, **metadata)
-        self.output_middleware.send(message)
+        self.middleware_config.output_middleware.send(message)
     
     def send_eof(self, client_id: str = '', additional_data: Optional[Dict[str, Any]] = None):
         """Send EOF message to output with client metadata.
@@ -112,7 +108,7 @@ class BaseWorker(ABC):
         # Forward EOF with client metadata
         additional_data = extract_eof_metadata(message)
         self.send_eof(client_id=client_id, additional_data=additional_data)
-        self.input_middleware.stop_consuming()
+        self.middleware_config.input_middleware.stop_consuming()
     
     def start_consuming(self):
         """Start consuming messages from the input queue."""
@@ -147,9 +143,9 @@ class BaseWorker(ABC):
                         
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
-            
-            self.input_middleware.start_consuming(on_message)
-            
+
+            self.middleware_config.input_middleware.start_consuming(on_message)
+
         except KeyboardInterrupt:
             logger.info("Worker interrupted by user")
         except Exception as e:
@@ -160,10 +156,7 @@ class BaseWorker(ABC):
     def cleanup(self):
         """Clean up resources."""
         try:
-            if self.input_middleware:
-                self.input_middleware.close()
-            if self.output_middleware:
-                self.output_middleware.close()
+            self.middleware_config.cleanup()
             logger.info("Resources cleaned up")
         except Exception as e:
             logger.warning(f"Error cleaning up resources: {e}")

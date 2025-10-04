@@ -2,7 +2,7 @@
 
 import logging
 from typing import List, Any
-from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
+from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from config import GatewayConfig
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class QueueManager:
         
         logger.info(f"Queue manager configured with RabbitMQ: {config.rabbitmq_host}:{config.rabbitmq_port}")
         logger.info(f"Transactions queue: {config.transactions_queue_name}")
-        logger.info("Stores queues: %s", config.stores_queue_names)
+        logger.info("Stores queues: %s", config.stores_exchange_name)
         logger.info(f"Users queue: {config.users_queue_name}")
         logger.info(f"Transaction items queue: {config.transaction_items_queue_name}")
         logger.info(f"Menu items queue: {config.menu_items_queue_name}")
@@ -36,13 +36,12 @@ class QueueManager:
         )
         
         # Stores queues (multiple)
-        self.stores_queues = [
-            RabbitMQMiddlewareQueue(
-                queue_name=queue_name,
-                **connection_params
-            )
-            for queue_name in self.config.stores_queue_names
-        ]
+        self.stores_exchange = RabbitMQMiddlewareExchange(
+            exchange_name=self.config.stores_exchange_name,
+            exchange_type='direct',
+            route_keys=[self.config.stores_exchange_name],
+            **connection_params
+        )
         
         # Users queue
         self.users_queue = RabbitMQMiddlewareQueue(
@@ -93,17 +92,16 @@ class QueueManager:
         """Send stores to all configured stores queues with client metadata."""
         logger.info("Processing %s stores for pipelines for client %s", len(stores), client_id)
         
-        for queue_name, queue in zip(self.config.stores_queue_names, self.stores_queues):
-            try:
-                message_with_metadata = {
-                    'client_id': client_id,
-                    'data': stores
-                }
-                queue.send(message_with_metadata)
-                logger.info("Sent %s stores to queue %s for client %s", len(stores), queue_name, client_id)
-            except Exception as e:
-                logger.error("Error sending stores to RabbitMQ (%s) for client %s: %s", queue_name, client_id, e)
-                raise
+        try:
+            message_with_metadata = {
+                'client_id': client_id,
+                'data': stores
+            }
+            self.stores_exchange.send(message_with_metadata)
+            logger.info("Sent %s stores to exchange %s for client %s", len(stores), self.config.stores_exchange_name, client_id)
+        except Exception as e:
+            logger.error("Error sending stores to RabbitMQ (%s) for client %s: %s", self.config.stores_exchange_name, client_id, e)
+            raise
     
     def send_users(self, users: List[Any], client_id: str) -> None:
         """Send users to the users processing queue with client metadata."""
@@ -197,18 +195,16 @@ class QueueManager:
     
     def propagate_stores_eof(self, client_id: str) -> None:
         """Propagate EOF message to all stores queues with client metadata."""
-        for queue_name, queue in zip(self.config.stores_queue_names, self.stores_queues):
-            try:
-                eof_message = {
-                    'client_id': client_id,
-                    'type': 'EOF',
-                    'data_type': 'STORES'
-                }
-                queue.send(eof_message)
-                logger.info("Propagated EOF to stores queue %s for client %s", queue_name, client_id)
-            except Exception as exc:
-                logger.error("Failed to propagate EOF to stores queue %s for client %s: %s", queue_name, client_id, exc)
-                # Don't raise here to allow other queues to receive EOF
+        try:
+            eof_message = {
+                'client_id': client_id,
+                'type': 'EOF',
+                'data_type': 'STORES'
+            }
+            self.stores_exchange.send(eof_message)
+            logger.info("Propagated EOF to stores exchange %s for client %s", self.config.stores_exchange_name, client_id)
+        except Exception as exc:
+            logger.error("Failed to propagate EOF to stores exchange %s for client %s: %s", self.config.stores_exchange_name, client_id, exc)
     
     def propagate_transaction_items_eof(self, client_id: str) -> None:
         """Propagate EOF message to transaction items queue with client metadata."""

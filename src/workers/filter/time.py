@@ -11,7 +11,6 @@ from worker_utils import extract_time_safe, run_main
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 class TimeFilterWorker(FilterWorker):
     """
     Worker that filters transactions by time (06:00 AM - 11:00 PM).
@@ -28,15 +27,6 @@ class TimeFilterWorker(FilterWorker):
         logger.info(f"TimeFilterWorker configured with time range: {self.start_time} - {self.end_time}")
     
     def apply_filter(self, item: Any) -> bool:
-        """
-        Filter a transaction by time (06:00 AM - 11:00 PM).
-        
-        Args:
-            item: Dictionary with transaction data
-            
-        Returns:
-            bool: True if transaction meets the time filter
-        """
         try:
             created_at = item.get('created_at')
             if not created_at:

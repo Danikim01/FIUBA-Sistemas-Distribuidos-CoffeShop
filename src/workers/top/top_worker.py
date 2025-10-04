@@ -3,6 +3,7 @@
 from abc import abstractmethod
 from asyncio.log import logger
 from typing import Any, Dict, TypeVar
+from message_utils import ClientId
 from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]
@@ -12,12 +13,12 @@ class TopWorker(BaseWorker):
     """Base class for single-source top workers with per-client state helpers."""
 
     @abstractmethod
-    def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
+    def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
         pass
 
     @abstractmethod
-    def create_payload(self, client_id: str) -> Dict[str, Any]:
+    def create_payload(self, client_id: ClientId) -> list[Dict[str, Any]]:
         """Create the payload for the output message."""
         pass
 
@@ -35,7 +36,7 @@ class TopWorker(BaseWorker):
             client_id,
         )
 
-        self.send_eof(client_id=client_id, additional_data={'source': 'tpv'})
+        self.send_eof(client_id=client_id)
 
     def process_message(self, message: Any):
         if not isinstance(message, dict):

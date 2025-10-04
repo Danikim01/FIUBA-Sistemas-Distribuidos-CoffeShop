@@ -8,8 +8,7 @@
     "gateway": {
       "OUTPUT_QUEUE": "transactions_raw",
       "RESULTS_QUEUE": "gateway_results",
-      "STORES_QUEUE": "stores_raw",
-      "STORES_QUEUES": "stores_raw,stores_for_top_clients",
+      "STORES_EXCHANGE": "stores_raw",
       "USERS_QUEUE": "users_raw",
       "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
       "MENU_ITEMS_QUEUE": "menu_items_raw",
@@ -91,7 +90,6 @@
       "count": 1,
       "environment": {
         "INPUT_QUEUE": "top_clients_partial",
-        "CLIENT_DATA_QUEUE": "client_data_raw",
         "OUTPUT_QUEUE": "gateway_results"
       }
     }

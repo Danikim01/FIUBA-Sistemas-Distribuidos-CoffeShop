@@ -32,7 +32,7 @@ def safe_float_conversion(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def safe_int_conversion(value: Any, default: int = 0) -> int:
+def safe_int_conversion(value: Any, minimum: int | None = None, default: int = 0) -> int:
     """Safely convert a value to int.
     
     Args:
@@ -43,6 +43,8 @@ def safe_int_conversion(value: Any, default: int = 0) -> int:
         Converted int value or default
     """
     try:
+        if minimum is not None and int(value) < minimum:
+            return default
         return int(float(value))
     except (ValueError, TypeError):
         return default
