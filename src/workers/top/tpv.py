@@ -21,33 +21,27 @@ class TPVWorker(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
-        self._tpv_totals: DefaultDict[
+        self.partial_tpv: DefaultDict[
             ClientId, DefaultDict[YearHalf, DefaultDict[StoreId, float]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
         logger.info("TPVWorker initialized")
 
     def reset_state(self, client_id: ClientId) -> None:
-        self._tpv_totals[client_id] = defaultdict(lambda: defaultdict(float))
+        self.partial_tpv[client_id] = defaultdict(lambda: defaultdict(float))
 
     def accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
         year_half: YearHalf | None = extract_year_half(payload.get('created_at'))
         if not year_half:
             return
-
-        try:
-            store_id: StoreId = safe_int_conversion(payload.get('store_id'), minimum=0)
-        except Exception:  # noqa: BLE001
-            logger.debug("Transaction without valid store_id: %s", payload)
-            return
-
+        
+        store_id: StoreId = safe_int_conversion(payload.get('store_id'), minimum=0)
         amount: float = safe_float_conversion(payload.get('final_amount'), 0.0)
 
-        bucket = self._tpv_totals[client_id][year_half]
-        bucket[store_id] += amount
+        self.partial_tpv[client_id][year_half][store_id] += amount
 
     def create_payload(self, client_id: str) -> list[Dict[str, Any]]:
-        totals = self._tpv_totals.get(client_id, {})
+        totals = self.partial_tpv.get(client_id, {})
         results: list[Dict[str, Any]] = []
 
         for year_half, stores in totals.items():
@@ -61,8 +55,6 @@ class TPVWorker(TopWorker):
                 )
 
         return results
-
- 
 
 if __name__ == '__main__':
     run_main(TPVWorker)

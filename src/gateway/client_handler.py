@@ -6,10 +6,11 @@ import threading
 import json
 from typing import Any
 
-from protocol import DataType, MessageType, receive_message, send_response # type: ignore
+from protocol import DataType, MessageType, receive_message, send_response  # type: ignore
 from message_handlers import MessageHandlers
 from queue_manager import QueueManager
 from client_session import ClientSessionManager
+from result_normalizer import normalize_queue_message
 
 logger = logging.getLogger(__name__)
 
@@ -128,22 +129,26 @@ class ClientHandler:
 
             if not isinstance(payload, dict):
                 return
-            
+
             try:
-                result_payload = {k: v for k, v in payload.items() if k != 'client_id'}
+                normalized_messages = normalize_queue_message(payload)
+                if not normalized_messages:
+                    logger.debug(
+                        "Discarding unrecognized result payload for client %s: %s",
+                        client_id,
+                        payload,
+                    )
+                    return
 
-                data_section = result_payload.get('data')
-                if isinstance(data_section, dict):
-                    merged_payload = data_section.copy()
-                    for key, value in result_payload.items():
-                        if key != 'data' and key not in merged_payload:
-                            merged_payload[key] = value
-                    result_payload = merged_payload
-
-                result_payload['client_id'] = client_id
-
-                logger.debug(f"Gateway sending result to client {client_id}: {result_payload}")
-                self._send_json_line(client_socket, result_payload)
+                for result_payload in normalized_messages:
+                    result_payload = dict(result_payload)
+                    result_payload['client_id'] = client_id
+                    logger.debug(
+                        "Gateway sending normalized result to client %s: %s",
+                        client_id,
+                        result_payload,
+                    )
+                    self._send_json_line(client_socket, result_payload)
             except Exception as exc:
                 logger.error(f"Failed to forward result to client {client_id}: {exc}")
 

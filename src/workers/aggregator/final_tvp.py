@@ -1,9 +1,10 @@
 from collections import defaultdict
-from typing import Any, Dict, List, Tuple
+from typing import Any, DefaultDict, Dict, List, Tuple
 from message_utils import ClientId
 from workers.aggregator.extra_source.stores import StoresExtraSource
 from workers.top.top_worker import TopWorker
-from worker_utils import normalize_tpv_entry, tpv_sort_key, run_main
+from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
+from workers.top.tpv import StoreId, YearHalf
 
 class StoreData:
     def __init__(self, year_half: str, tpv: float, store_name: str = "Unknown"):
@@ -11,65 +12,46 @@ class StoreData:
         self.tpv = tpv
         self.store_name = store_name
 
-StoreId = str
-
 class TPVAggregator(TopWorker): 
     def __init__(self) -> None:
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
-        self.recieved_payloads: Dict[ClientId, Dict[StoreId, List[StoreData]]] = {}
+        self.recieved_payloads: DefaultDict[
+            ClientId, DefaultDict[YearHalf, DefaultDict[StoreId, float]]
+        ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
 
     def reset_state(self, client_id: ClientId) -> None:
-        self.recieved_payloads[client_id] = {}
+        self.recieved_payloads[client_id] = defaultdict(lambda: defaultdict(float))
 
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
-        store_id: StoreId = str(payload.get("store_id", ""))
-        entry = StoreData(
-            year_half=str(payload.get("year_half_created_at", "")),
-            tpv=float(payload.get("tpv", 0.0)),
-        )
-        self.recieved_payloads\
-            .setdefault(client_id, {})\
-            .setdefault(store_id, [])\
-            .append(entry)
+        store_id: StoreId = safe_int_conversion(payload.get("store_id"), minimum=0)
+        year_half: YearHalf = payload.get("year_half_created_at", "Unknown")
+        tpv: float = float(payload.get("tpv", 0.0))
+        self.recieved_payloads[client_id][year_half][store_id] += tpv
 
     def get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
-        return self.stores_source.get_item_when_done(client_id, store_id)
-
-    def _aggregate_payloads(
-        self,
-        client_id: ClientId,
-        client_payloads: Dict[StoreId, List[StoreData]],
-    ) -> List[Dict[str, Any]]:
-        """
-        Aggregate per (year_half, store_id) summing tpv, then enrich with store_name.
-        Returns a list of rows sorted by (year_half, -tpv).
-        """
-        totals: Dict[Tuple[str, StoreId], float] = defaultdict(float)
-
-        for store_id, entries in client_payloads.items():
-            for e in entries:
-                totals[(e.year_half, store_id)] += e.tpv
-
-        # Build final rows with enrichment
-        rows: List[Dict[str, Any]] = []
-        for (year_half, store_id), tpv_sum in totals.items():
-            entry = {
-                "year_half_created_at": year_half,
-                "store_id": store_id,
-                "tpv": float(tpv_sum),
-                "store_name": self.get_store_name(client_id, store_id),
-            }
-            rows.append(normalize_tpv_entry(entry))
-
-        rows.sort(key=tpv_sort_key)
-        return rows
+        return self.stores_source.get_item_when_done(client_id, str(store_id))
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:
+        # Inject store names into the payload
         client_payloads = self.recieved_payloads.get(client_id, {})
-        return self._aggregate_payloads(client_id, client_payloads)
+        results: List[Dict[str, Any]] = []
+        for year_half, stores in client_payloads.items():
+            for store_id, tpv_value in stores.items():
+                store_name = self.get_store_name(client_id, store_id)
+                entry = normalize_tpv_entry(
+                    {
+                        "year_half_created_at": year_half,
+                        "store_id": store_id,
+                        "tpv": tpv_value,
+                        "store_name": store_name,
+                    }
+                )
+                results.append(entry)
+        results.sort(key=tpv_sort_key, reverse=True)
+        return results
 
     def cleanup(self) -> None:
         try:
