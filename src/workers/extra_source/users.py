@@ -5,7 +5,7 @@ from typing import Dict, Optional
 
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.aggregator.extra_source.extra_source import ExtraSource
+from workers.extra_source.extra_source import ExtraSource
 
 UserId = str
 Birthday = str
@@ -45,7 +45,7 @@ class UsersExtraSource(ExtraSource):
         def append_user(item: dict):
             uid = item.get(id_column)
             bday = item.get(birthday_column)
-            if uid and bday:
+            if uid is not None and bday is not None:
                 users[str(uid)] = str(bday)
 
         if isinstance(data, list):

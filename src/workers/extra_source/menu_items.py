@@ -1,10 +1,14 @@
 import logging
 import os
+from typing import Any
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.aggregator.extra_source.extra_source import ExtraSource
+from workers.extra_source.extra_source import ExtraSource
 
 logger = logging.getLogger(__name__)
+
+id_column = 'item_id'
+name_column = 'item_name'
 
 ItemId = str
 ItemName = str
@@ -20,17 +24,20 @@ class MenuItemsExtraSource(ExtraSource):
         super().__init__(menu_items_queue, middleware)
         self.data: dict[ClientId, dict[ItemId, ItemName]] = {}
     
-    def save_message(self, data: dict):
+    def save_message(self, data: Any):
         """Save the message to disk or process it as needed."""
         if isinstance(data, list):
             for item in data:
                 self.save_message(item)
 
         if isinstance(data, dict):
-            self.data.setdefault(self.current_client_id, {}).setdefault(data['item_id'], data['item_name'])
+            stores = self.data.setdefault(self.current_client_id, {})
+            id = str(data.get(id_column, '')).strip()
+            name = data.get(name_column, '').strip()
+            stores[id] = name
 
 
-    def _get_item(self, client_id: ClientId, item_id: str) -> ItemName:
+    def _get_item(self, client_id: ClientId, item_id: ItemId) -> ItemName:
         """Retrieve item from the extra source.
         Returns a dict or None if out of range.
         """

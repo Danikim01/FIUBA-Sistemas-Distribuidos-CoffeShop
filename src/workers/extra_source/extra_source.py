@@ -4,7 +4,7 @@ import threading
 from typing import Any
 from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
-from workers.aggregator.extra_source.done import Done
+from workers.extra_source.done import Done
 
 logger = logging.getLogger(__name__)
 
@@ -32,24 +32,32 @@ class ExtraSource(ABC):
         """Start consuming messages from the extra source."""
 
         def on_message(message):
-            client_id, data = extract_data_and_client_id(message)
-            self.current_client_id = client_id
+            try:
+                if not message:
+                    logger.warning(f"Empty message received from {self.name}")
+                    return
+                    
+                client_id, data = extract_data_and_client_id(message)
+                self.current_client_id = client_id
 
-            if self.clients_done.is_client_done(client_id):
-                logger.info(f"Extra source {self.name} already done, ignoring message")
-                return
-            
-            if is_eof_message(message):
-                logger.info(f"EOF received from extra source {self.name}")
-                self.clients_done.set_done(client_id)
-                return
+                if self.clients_done.is_client_done(client_id):
+                    logger.info(f"Extra source {self.name} already done, ignoring message")
+                    return
+                
+                if is_eof_message(message):
+                    logger.info(f"EOF received from extra source {self.name}")
+                    self.clients_done.set_done(client_id)
+                    return
 
-            self.save_message(data)
+                self.save_message(data)
+                
+            except Exception as e:
+                logger.error(f"Error interno iniciando consumo: Error procesando mensaje: {e}")
 
         try:
             self.middleware.start_consuming(on_message)
         except Exception as exc:  # noqa: BLE001
-            logger.error(f"Error consuming from {self.name}: {exc}")
+            logger.error(f"Error consuming from {self.name}: Error interno iniciando consumo: Error procesando mensaje: {exc}")
 
     def start_consuming(self):
         """Start the consuming thread."""

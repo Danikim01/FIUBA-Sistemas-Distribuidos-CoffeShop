@@ -2,7 +2,7 @@ import logging
 import os
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.aggregator.extra_source.extra_source import ExtraSource
+from workers.extra_source.extra_source import ExtraSource
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,10 @@ class StoresExtraSource(ExtraSource):
                 self.save_message(item)
 
         if isinstance(data, dict):
-            store_id = data.get('store_id', '').strip()
-            store_name = data.get('store_name', '').strip()
-            self.data[self.current_client_id][store_id] = store_name
+            stores = self.data.setdefault(self.current_client_id, {})
+            store_id = str(data.get('store_id', '')).strip()
+            store_name = str(data.get('store_name', '')).strip()
+            stores[store_id] = store_name
 
     def _get_item(self, client_id: ClientId, item_id: str) -> StoreName:
         """Retrieve item from the extra source.

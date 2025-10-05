@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Tuple
 from message_utils import ClientId
-from workers.aggregator.extra_source.stores import StoresExtraSource
+from workers.extra_source.stores import StoresExtraSource
 from workers.top.top_worker import TopWorker
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main
 from workers.top.tpv import StoreId, YearHalf

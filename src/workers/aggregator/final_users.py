@@ -8,8 +8,8 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
-from workers.aggregator.extra_source.users import UsersExtraSource
-from workers.aggregator.extra_source.stores import StoresExtraSource
+from workers.extra_source.users import UsersExtraSource
+from workers.extra_source.stores import StoresExtraSource
 from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
