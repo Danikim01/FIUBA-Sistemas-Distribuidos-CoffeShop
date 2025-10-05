@@ -49,7 +49,7 @@ class TPVAggregator(TopWorker):
                 )
                 results.append(entry)
 
-        results.sort(key=tpv_sort_key, reverse=True)
+        results.sort(key=tpv_sort_key)
         return results
 
     def gateway_type_metadata(self) -> dict:

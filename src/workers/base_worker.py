@@ -1,14 +1,12 @@
 """Base worker class providing common functionality for all workers."""
 
 import logging
-import os
 import signal
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from handle_eof import EOFHandler
 from middleware_config import MiddlewareConfig
 from message_utils import (
-    ClientId,
     is_eof_message,
     extract_client_metadata,
     create_message_with_metadata,
