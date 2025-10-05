@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict
 from message_utils import ClientId
 from worker_utils import run_main
+from workers.aggregator.extra_source.users import UsersExtraSource
 from workers.aggregator.extra_source.stores import StoresExtraSource
 from workers.top.top_worker import TopWorker
 
@@ -19,7 +20,7 @@ class TopClientsBirthdaysAggregator(TopWorker):
         super().__init__()
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
-        self.birthdays_source = StoresExtraSource(self.middleware_config)
+        self.birthdays_source = UsersExtraSource(self.middleware_config)
         self.birthdays_source.start_consuming()
         self.recieved_payloads: Dict[ClientId, list[dict[str, Any]]] = {}
 
@@ -31,42 +32,65 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
     def create_payload(self, client_id: ClientId) -> list[Dict[str, Any]]:
         client_payloads = self.recieved_payloads.pop(client_id, [])
-        aggregated: Dict[int, Dict[str, Any]] = {}
+        aggregated: Dict[tuple[str, int], Dict[str, Any]] = {}
 
         for payload in client_payloads:
-            store_id = str(payload.get("store_id", ""))
-            user_id = int(payload.get("user_id", 0))
-            purchase_qty = int(payload.get("purchase_qty", 0))
+            store_id = str(payload.get("store_id", "")).strip()
+            try:
+                user_id = int(payload.get("user_id", 0))
+            except (TypeError, ValueError):
+                user_id = 0
 
-            if store_id and user_id > 0:
-                if user_id not in aggregated:
-                    aggregated[user_id] = {
-                        "user_id": user_id,
-                        "total_purchase_qty": 0,
-                        "store_id": store_id,
-                    }
-                aggregated[user_id]["total_purchase_qty"] += purchase_qty
+            raw_qty = payload.get("purchases_qty") or payload.get("purchase_qty") or 0
+            try:
+                purchase_qty = int(raw_qty)
+            except (TypeError, ValueError):
+                purchase_qty = 0
+
+            if not store_id or user_id <= 0 or purchase_qty <= 0:
+                continue
+
+            key = (store_id, user_id)
+
+            if key not in aggregated:
+                aggregated[key] = {
+                    "store_id": store_id,
+                    "user_id": user_id,
+                    "purchases_qty": 0,
+                }
+
+            aggregated[key]["purchases_qty"] += purchase_qty
 
         # Enrich with birthdays and store names
         results: list[Dict[str, Any]] = []
-        for user_data in aggregated.values():
-            user_id = user_data["user_id"]
-            store_id = user_data["store_id"]
+        for entry in aggregated.values():
+            user_id = entry["user_id"]
+            store_id = entry["store_id"]
 
-            birthday = self.birthdays_source.get_item_when_done(client_id, str(user_id))
+            birthdate = self.birthdays_source.get_item_when_done(
+                client_id,
+                str(user_id),
+            )
             store_name = self.stores_source.get_item_when_done(client_id, store_id)
 
-            result_entry = {
-                "user_id": user_id,
-                "total_purchase_qty": user_data["total_purchase_qty"],
-                "store_id": store_id,
-                "store_name": store_name,
-                "birthday": birthday,
-            }
-            results.append(result_entry)
+            results.append(
+                {
+                    "user_id": user_id,
+                    "store_id": store_id,
+                    "store_name": store_name,
+                    "birthdate": birthdate,
+                    "purchases_qty": entry["purchases_qty"],
+                }
+            )
 
-        # Sort by total_purchase_qty desc, then by user_id asc
-        results.sort(key=lambda x: (-x["total_purchase_qty"], x["user_id"]))
+        # Sort by store, then desc purchases, then user id for stable output
+        results.sort(
+            key=lambda row: (
+                row["store_id"],
+                -int(row.get("purchases_qty", 0) or 0),
+                row["user_id"],
+            )
+        )
 
         return results
 
@@ -75,8 +99,9 @@ class TopClientsBirthdaysAggregator(TopWorker):
         super().cleanup()
         try:
             self.stores_source.close()
+            self.birthdays_source.close()
         except Exception:  # noqa: BLE001
-            logger.warning("Failed to close extra input queue", exc_info=True)
+            logger.warning("Failed to close extra sources", exc_info=True)
 
 
 if __name__ == '__main__':

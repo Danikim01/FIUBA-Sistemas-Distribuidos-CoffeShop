@@ -13,7 +13,7 @@ Birthday = str
 id_column = 'user_id'
 birthday_column = 'birthdate'
     
-class ClientsExtraSource(ExtraSource):
+class UsersExtraSource(ExtraSource):
     def __init__(self, middleware_config: MiddlewareConfig):
         """Initialize an extra source for the worker.
         
@@ -21,7 +21,7 @@ class ClientsExtraSource(ExtraSource):
             name: Name of the extra source
             queue: Queue name for the extra source (optional)
         """
-        clients_queue = os.getenv('CLIENTS_QUEUE', 'clients_raw').strip()
+        clients_queue = os.getenv('CLIENTS_QUEUE', 'users_raw').strip()
         middleware = middleware_config.create_queue(clients_queue)
         super().__init__(clients_queue, middleware)
         self.data: dict[ClientId, Dict[UserId, Birthday]] = {}
