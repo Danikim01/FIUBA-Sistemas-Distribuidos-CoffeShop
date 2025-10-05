@@ -7,6 +7,7 @@ import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict
 
+from message_utils import ClientId
 from worker_utils import run_main, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
@@ -27,6 +28,9 @@ class TopClientsWorker(TopWorker):
 
         logger.info("TopClientsWorker configured with top_n=%s", self.top_n)
 
+    def reset_state(self, client_id: ClientId) -> None:
+        self._client_counts[client_id] = defaultdict(lambda: defaultdict(int))
+
     def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
         try:
             store_id = safe_int_conversion(payload.get('store_id'))
@@ -46,7 +50,7 @@ class TopClientsWorker(TopWorker):
 
         self._client_counts[client_id][store_id][user_id] += quantity
 
-    def create_payload(self, client_id: str) -> Dict[str, Any]:
+    def create_payload(self, client_id: str) -> list[Dict[str, Any]]:
         counts_for_client = self._client_counts.pop(client_id, {})
         results: list[Dict[str, Any]] = []
 
@@ -65,14 +69,7 @@ class TopClientsWorker(TopWorker):
                     }
                 )
 
-        results.sort(key=lambda row: (row['store_id'], -row['purchases_qty'], row['user_id']))
-
-        payload = {
-            'type': 'top_clients_partial',
-            'results': results,
-        }
-
-        return payload
+        return results
 
 if __name__ == '__main__':
     run_main(TopClientsWorker)

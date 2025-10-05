@@ -27,6 +27,8 @@ class TPVWorker(TopWorker):
 
         logger.info("TPVWorker initialized")
 
+    def reset_state(self, client_id: ClientId) -> None:
+        self._tpv_totals[client_id] = defaultdict(lambda: defaultdict(float))
 
     def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
         year_half: YearHalf | None = extract_year_half(payload.get('created_at'))

@@ -48,6 +48,10 @@ class FinalItemsAggregator(TopWorker):
             self.top_per_month,
         )
 
+    def reset_state(self, client_id: ClientId) -> None:
+        self._quantity_totals[client_id] = _new_quantity_totals()
+        self._profit_totals[client_id] = _new_profit_totals()
+
     def _merge_quantity_entries(self, client_id: ClientId, entries: Any) -> None:
         if not isinstance(entries, list):
             return

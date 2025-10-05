@@ -22,16 +22,21 @@ class TopWorker(BaseWorker):
         """Create the payload for the output message."""
         pass
 
+    @abstractmethod
+    def reset_state(self, client_id: ClientId) -> None:
+        """Reset the internal state for a given client."""
+        pass
+
     def handle_eof(self, message: Dict[str, Any]):
         client_id = message.get('client_id', self.current_client_id)
 
         def callback():
             payload = self.create_payload(client_id)
+            self.reset_state(client_id)
             self.send_message(payload, client_id=client_id)
             logger.info(
                 "%s emitted results for client %s",
                 self.__class__.__name__,
-                client_id,
                 payload
             )
         

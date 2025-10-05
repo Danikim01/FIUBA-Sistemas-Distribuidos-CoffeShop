@@ -2,11 +2,6 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 <worker-count>" >&2
-  exit 1
-fi
-
 WORKER_COUNT=$1
 CONFIG_PATH=workers_config.json
 
