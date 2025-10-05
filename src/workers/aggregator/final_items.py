@@ -203,6 +203,12 @@ class FinalItemsAggregator(TopWorker):
         }
 
         return [payload]
+    
+    def cleanup(self) -> None:
+        try:
+            self.menu_items_source.close()
+        finally:
+            super().cleanup()
 
 
 if __name__ == "__main__":

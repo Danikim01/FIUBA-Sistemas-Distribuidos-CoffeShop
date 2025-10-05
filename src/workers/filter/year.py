@@ -12,6 +12,8 @@ from worker_utils import run_main
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+created_at_field = 'created_at'
+
 class YearFilterWorker(FilterWorker):
     """
     Worker que filtra transacciones por año (2024 y 2025).
@@ -28,7 +30,7 @@ class YearFilterWorker(FilterWorker):
     def apply_filter(self, item: Any) -> bool:
         try:
             # Suponiendo que item es un dict con string ISO8601 en 'created_at'
-            created_at = item.get("created_at")
+            created_at = item.get(created_at_field)
             if not created_at:
                 return False
             dt = datetime.fromisoformat(created_at)
