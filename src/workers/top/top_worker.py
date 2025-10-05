@@ -27,6 +27,10 @@ class TopWorker(BaseWorker):
         """Reset the internal state for a given client."""
         pass
 
+    def type_metadata(self) -> dict:
+        """For gateway use only."""
+        return {}
+
     # @overwrite
     def handle_eof(self, message: Dict[str, Any]):
         client_id = message.get('client_id', self.current_client_id)
@@ -37,7 +41,7 @@ class TopWorker(BaseWorker):
             return
 
         self.reset_state(client_id)
-        self.send_message(payload, client_id=client_id)
+        self.send_message(payload, client_id=client_id, type_metadata=self.type_metadata())
         logger.info(
             "%s emitted %s result(s) for client %s",
             self.__class__.__name__,

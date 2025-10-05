@@ -38,6 +38,7 @@ class TPVAggregator(TopWorker):
         # Inject store names into the payload
         client_payloads = self.recieved_payloads.get(client_id, {})
         results: List[Dict[str, Any]] = []
+
         for year_half, stores in client_payloads.items():
             for store_id, tpv_value in stores.items():
                 store_name = self.get_store_name(client_id, store_id)
@@ -50,8 +51,14 @@ class TPVAggregator(TopWorker):
                     }
                 )
                 results.append(entry)
+
         results.sort(key=tpv_sort_key, reverse=True)
         return results
+
+    def type_metadata(self) -> dict:
+        return {
+            "list_type": "TPV_SUMMARY",
+        }
 
     def cleanup(self) -> None:
         try:

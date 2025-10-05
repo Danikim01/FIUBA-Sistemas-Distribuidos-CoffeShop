@@ -94,6 +94,11 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
         return results
 
+    def type_metadata(self) -> dict:
+        return {
+            "list_type": "TOP_CLIENTS_BIRTHDAYS",
+        }
+
 
     def cleanup(self):
         super().cleanup()
