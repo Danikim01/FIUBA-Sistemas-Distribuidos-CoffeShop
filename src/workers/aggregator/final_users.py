@@ -86,18 +86,12 @@ class TopClientsBirthdaysAggregator(TopWorker):
         # Sort by store, then desc purchases, then user id for stable output
         results.sort(
             key=lambda row: (
-                row["store_id"],
+                row["store_name"],
                 -int(row.get("purchases_qty", 0) or 0),
-                row["user_id"],
+                row["birthdate"],
             )
         )
 
-        logger.info(
-            "%s aggregated %d unique client(s) for client %s",
-            self.__class__.__name__,
-            results,
-            client_id,
-        )
         return results
 
 
