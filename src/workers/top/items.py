@@ -33,7 +33,7 @@ class TopItemsWorker(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
-        self.top_per_month = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1')) or 1
+        self.top_per_month = safe_int_conversion(os.getenv('TOP_ITEMS_COUNT', '1'), default=1)
         self._quantity_totals: QuantityTotals = defaultdict(_new_monthly_quantity_map)
         self._profit_totals: ProfitTotals = defaultdict(_new_monthly_profit_map)
 

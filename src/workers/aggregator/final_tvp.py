@@ -21,7 +21,7 @@ class TPVAggregator(TopWorker):
         self._stores_thread = threading.Thread(
             target=self.stores_source.start_consuming,
             name="stores-extra-source",
-            daemon=True,
+            daemon=True,   
         )
         self._stores_thread.start()
         self.recieved_payloads: Dict[ClientId, Dict[StoreId, List[StoreData]]] = {}
