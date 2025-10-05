@@ -1,122 +1,99 @@
 {
   "common_environment": {
     "RABBITMQ_HOST": "rabbitmq",
-    "RABBITMQ_PORT": 5672
+    "RABBITMQ_PORT": 5672,
+    "prefetch_count": 20
   },
   "service_environment": {
     "gateway": {
       "OUTPUT_QUEUE": "transactions_raw",
       "RESULTS_QUEUE": "gateway_results",
-      "STORES_QUEUE": "stores_raw",
-      "STORES_QUEUES": "stores_raw,stores_for_top_clients",
+      "STORES_EXCHANGE": "stores_raw",
       "USERS_QUEUE": "users_raw",
       "TRANSACTION_ITEMS_QUEUE": "transaction_items_raw",
       "MENU_ITEMS_QUEUE": "menu_items_raw",
       "CHUNK_SIZE": 5000
     },
-    "client": {}
+    "client": {
+      "count": 2,
+      "GATEWAY_HOST": "gateway",
+      "GATEWAY_PORT": "12345",
+      "BATCH_MAX_SIZE_KB": "64",
+      "LOG_LEVEL": "INFO",
+      "DATA_DIR": ".data"
+    }
   },
   "workers": {
     "year_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_raw",
-            "OUTPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUES": "transactions_year_filtered,transactions_year_for_top_clients"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transactions_raw",
+        "OUTPUT_EXCHANGE": "transactions_year_filtered"
+      }
+    },
+    "items_year_filter": {
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_raw",
+        "OUTPUT_QUEUE": "transaction_items_year_filtered"
+      }
     },
     "time_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_year_filtered",
-            "OUTPUT_QUEUE": "transactions_time_filtered",
-            "OUTPUT_QUEUES": "transactions_time_filtered,transactions_time_filtered_tpv"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered",
+        "INPUT_QUEUE": "transactions_year_filtered_time",
+        "OUTPUT_EXCHANGE": "transactions_time_filtered"
+      }
     },
     "amount_filter": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 2,
-          "environment": {
-            "INPUT_QUEUE": "transactions_time_filtered",
-            "OUTPUT_QUEUE": "transactions_final_results"
-          }
-        }
-      ]
-    },
-    "transactions_projection": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_year_for_top_clients",
-            "OUTPUT_QUEUE": "transactions_compact"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_amount",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     },
     "tpv": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_time_filtered_tpv",
-            "OUTPUT_QUEUE": "transactions_final_results"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv",
+        "OUTPUT_QUEUE": "tpv_partial"
+      }
     },
     "items_top": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "ITEMS_INPUT_QUEUE": "transaction_items_raw",
-            "MENU_ITEMS_INPUT_QUEUE": "menu_items_raw",
-            "OUTPUT_QUEUE": "transactions_final_results"
-          }
-        }
-      ]
+      "count": 2,
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_year_filtered",
+        "OUTPUT_QUEUE": "top_items_partial"
+      }
     },
     "top_clients": {
-      "prefetch_count": 20,
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "TRANSACTIONS_QUEUE": "transactions_compact",
-            "USERS_QUEUE": "users_raw",
-            "STORES_QUEUE": "stores_for_top_clients",
-            "OUTPUT_QUEUE": "transactions_final_results"
-          }
-        }
-      ]
+      "count": 1,
+      "environment": {
+        "INPUT_EXCHANGE": "transactions_year_filtered",
+        "INPUT_QUEUE": "transactions_year_filtered_top_clients",
+        "OUTPUT_QUEUE": "top_clients_partial"
+      }
     },
-    "results": {
-      "groups": [
-        {
-          "count": 1,
-          "environment": {
-            "INPUT_QUEUE": "transactions_final_results",
-            "OUTPUT_QUEUE": "gateway_results",
-            "EXPECTED_EOF_COUNT": 4
-          }
-        }
-      ]
+    "items_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "top_items_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
+    },
+    "tpv_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "tpv_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
+    },
+    "top_clients_birthdays": {
+      "environment": {
+        "INPUT_QUEUE": "top_clients_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
     }
   }
 }
