@@ -14,6 +14,7 @@ class EOFHandler:
         self.worker_id: int = int(os.getenv('WORKER_ID', '0'))
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
         self.middleware_config = middleware_config
+        self._queue_requeue_middleware = None
 
     def handle_eof(
         self,
@@ -47,11 +48,18 @@ class EOFHandler:
             Counter dictionary
         """
         additional_data: Dict[str, Any] = extract_eof_metadata(message)
-        counter: Counter = additional_data.get('counter', {})
+        raw_counter: Dict[Any, Any] = additional_data.get('counter', {}) or {}
 
-        if counter.get(self.worker_id) is None:
-            counter[self.worker_id] = 0
-        counter[self.worker_id] += 1
+        counter: Counter = {}
+        for key, value in raw_counter.items():
+            try:
+                counter[int(key)] = int(value)
+            except (TypeError, ValueError):
+                logger.debug("Ignoring invalid counter entry %s=%s", key, value)
+
+        logger.info("EOF received with counter: %s", counter)
+
+        counter[self.worker_id] = counter.get(self.worker_id, 0) + 1
 
         return counter
 
@@ -91,4 +99,20 @@ class EOFHandler:
             message_type='EOF',
             counter=dict(counter),
         )
-        self.middleware_config.input_middleware.send(message)
+        if self.middleware_config.has_input_exchange() and self.middleware_config.input_queue:
+            if self._queue_requeue_middleware is None:
+                self._queue_requeue_middleware = self.middleware_config.create_queue(
+                    self.middleware_config.input_queue
+                )
+            self._queue_requeue_middleware.send(message)
+        else:
+            self.middleware_config.input_middleware.send(message)
+
+    def cleanup(self) -> None:
+        if self._queue_requeue_middleware:
+            try:
+                self._queue_requeue_middleware.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Error closing requeue middleware: %s", exc)
+            finally:
+                self._queue_requeue_middleware = None

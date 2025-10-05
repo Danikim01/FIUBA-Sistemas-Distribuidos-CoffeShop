@@ -134,6 +134,7 @@ class BaseWorker(ABC):
     def cleanup(self):
         """Clean up resources."""
         try:
+            self.eof_handler.cleanup()
             self.middleware_config.cleanup()
             logger.info("Resources cleaned up")
         except Exception as e:
