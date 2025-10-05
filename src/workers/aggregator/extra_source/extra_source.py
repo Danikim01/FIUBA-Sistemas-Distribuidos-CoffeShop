@@ -75,12 +75,13 @@ class ExtraSource(ABC):
         client_id: ClientId,
         item_id: str,
     ) -> str:
-        if self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
-            return self._get_item(client_id, item_id)
-        logger.warning(
-            "Timed out waiting for extra source %s to finish for client %s before retrieving %s",
-            self.name,
-            client_id,
-            item_id,
-        )
+        if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
+            logger.warning(
+                "Timed out waiting for extra source %s to finish for client %s before retrieving %s",
+                self.name,
+                client_id,
+                item_id,
+            )
+            
+        # Devuelve el item aunque no esté done, porque puede que ya esté cargado
         return self._get_item(client_id, item_id)

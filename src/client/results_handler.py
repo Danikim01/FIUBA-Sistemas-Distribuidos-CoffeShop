@@ -317,16 +317,15 @@ class ResultsHandler:
             )
             return True
 
-        if "tpv" in sample_keys or {
-            "year",
-            "semester",
-            "store_name",
-        }.intersection(sample_keys):
-            self._render_tpv_summary({"results": rows}, client_id)
-            return True
-
         if {"user_id", "purchases_qty"}.issubset(sample_keys) or "birthdate" in sample_keys:
             self._render_top_clients_birthdays({"results": rows}, client_id)
+            return True
+
+        if "tpv" in sample_keys or "year_half_created_at" in sample_keys or {
+            "year",
+            "semester",
+        }.issubset(sample_keys):
+            self._render_tpv_summary({"results": rows}, client_id)
             return True
 
         return False
