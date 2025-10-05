@@ -70,7 +70,7 @@ class QueueManager:
     def send_transactions_chunks(self, transactions: List[Any], client_id: str) -> None:
         """Send transactions in chunks to the processing queue with client metadata."""
         chunks = self._create_chunks(transactions, self.config.chunk_size)
-        logger.info(f"Creating {len(chunks)} chunks of transactions for client {client_id}")
+        logger.debug(f"Creating {len(chunks)} chunks of transactions for client {client_id}")
         
         try:
             for i, chunk in enumerate(chunks):
@@ -81,7 +81,7 @@ class QueueManager:
                     'total_chunks': len(chunks)
                 }
                 self.transactions_queue.send(message_with_metadata)
-                logger.info(f"Sent chunk {i+1}/{len(chunks)} with {len(chunk)} transactions for client {client_id}")
+                logger.debug(f"Sent chunk {i+1}/{len(chunks)} with {len(chunk)} transactions for client {client_id}")
             
             logger.info(f"Sent {len(chunks)} chunks with {len(transactions)} total transactions for client {client_id}")
         except Exception as e:
@@ -129,7 +129,7 @@ class QueueManager:
         
         try:
             chunks = self._create_chunks(transaction_items, self.config.chunk_size)
-            logger.info("Creating %s chunks of transaction items for client %s", len(chunks), client_id)
+            logger.debug("Creating %s chunks of transaction items for client %s", len(chunks), client_id)
 
             for i, chunk in enumerate(chunks):
                 message_with_metadata = {
@@ -139,7 +139,7 @@ class QueueManager:
                     'total_chunks': len(chunks)
                 }
                 self.transaction_items_queue.send(message_with_metadata)
-                logger.info(
+                logger.debug(
                     "Sent chunk %s/%s with %s transaction items for client %s",
                     i + 1,
                     len(chunks),

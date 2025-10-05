@@ -19,6 +19,7 @@ class ExtraSource(ABC):
         self.name = name
         self.middleware = middleware
         self.client_done: dict[ClientId, Done] = {}
+        self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
 
     def is_done(self, client_id: ClientId, block: bool = False, timeout: float | None = None) -> bool:
         """Check or wait for the extra source to finish processing for a specific client.
@@ -42,8 +43,10 @@ class ExtraSource(ABC):
     def close(self):
         """Close the middleware connection."""
         self.middleware.close()
+        if self.consuming_thread.is_alive():
+            self.consuming_thread.join(timeout=10.0)
 
-    def start_consuming(self):
+    def _start_consuming(self):
         """Start consuming messages from the extra source."""
 
         def on_message(message):
@@ -73,6 +76,11 @@ class ExtraSource(ABC):
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Error consuming from {self.name}: {exc}")
 
+    def start_consuming(self):
+        """Start the consuming thread."""
+        if not self.consuming_thread.is_alive():
+            self.consuming_thread.start()
+
     @abstractmethod
     def save_message(self, message):
         """Handle and persist a message from the extra source.
@@ -85,13 +93,18 @@ class ExtraSource(ABC):
     @abstractmethod
     def _get_item(self, client_id: ClientId, item_id: str) -> str:
         raise NotImplementedError
-    
-    def get_item(self, client_id: ClientId, item_id: str) -> str:
-        """Retrieve item from the extra source.
-        Returns a dict or None if out of range.
-        """
-        logger.info(f"Getting item {item_id} for client {client_id} from extra source {self.name}")
+
+    def get_item_when_done(
+        self,
+        client_id: ClientId,
+        item_id: str,
+    ) -> str:
         if self.is_done(client_id, block=True, timeout=10.0):
             return self._get_item(client_id, item_id)
-        logger.warning(f"Attempted to get item {item_id} for client {client_id} before extra source {self.name} was done")
-        return 'Timeout - Not Ready'
+        logger.warning(
+            "Timed out waiting for extra source %s to finish for client %s before retrieving %s",
+            self.name,
+            client_id,
+            item_id,
+        )
+        return self._get_item(client_id, item_id)

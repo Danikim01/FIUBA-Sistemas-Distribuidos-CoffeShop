@@ -107,7 +107,7 @@ class ClientHandler:
         def handle_payload(payload: Any) -> None:
             nonlocal eof_sent
 
-            logger.info(f"Handling payload for client {client_id}: {payload}")
+            logger.debug(f"Handling payload for client {client_id}: {payload}")
 
             if (payload.get('client_id') != client_id):
                 return

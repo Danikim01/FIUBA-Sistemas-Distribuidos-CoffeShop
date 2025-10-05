@@ -43,7 +43,7 @@ class TopItemsWorker(TopWorker):
         self._quantity_totals[client_id] = _new_monthly_quantity_map()
         self._profit_totals[client_id] = _new_monthly_profit_map()
 
-    def _accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
+    def accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
         year_month = extract_year_month(payload.get('created_at'))
         if not year_month:
             return

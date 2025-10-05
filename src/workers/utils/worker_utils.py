@@ -2,7 +2,7 @@
 
 import sys
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Tuple, Dict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -14,6 +14,9 @@ def run_main(worker_class, *args, **kwargs):
     except Exception as e:
         logger.error(f"Error in main: {e}")
         sys.exit(1)
+
+
+YearHalfSortKey = Tuple[int, int]
 
 
 def safe_float_conversion(value: Any, default: float = 0.0) -> float:
@@ -187,3 +190,153 @@ def extract_year_month(created_at: Any) -> str | None:
             return None
 
     return dt.strftime('%Y-%m')
+
+
+def _parse_year(value: Any) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return 0
+
+
+def _parse_half(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return 0
+
+    text = str(value).strip().upper()
+    if not text:
+        return 0
+    if text.startswith('H'):
+        text = text[1:]
+    if text.endswith('H'):
+        text = text[:-1]
+    return int(text) if text.isdigit() else 0
+
+
+def normalize_year_half(
+    raw_period: Any,
+    *,
+    year: Any | None = None,
+    semester: Any | None = None,
+) -> Tuple[str, int, int]:
+    """Normalize year/half information and return display value plus numeric tuple."""
+
+    normalized_year = 0
+    normalized_half = 0
+
+    if isinstance(raw_period, str) and raw_period:
+        period = raw_period.strip()
+        upper = period.upper()
+        if '-H' in upper:
+            year_part, half_part = upper.split('-H', 1)
+            normalized_year = _parse_year(year_part)
+            normalized_half = _parse_half(half_part)
+        elif '-' in upper:
+            year_part, half_part = upper.split('-', 1)
+            normalized_year = _parse_year(year_part)
+            normalized_half = _parse_half(half_part)
+        else:
+            normalized_year = _parse_year(upper)
+            normalized_half = _parse_half(upper)
+
+    if not normalized_year and year is not None:
+        normalized_year = _parse_year(year)
+    if not normalized_half and semester is not None:
+        normalized_half = _parse_half(semester)
+
+    if normalized_year and normalized_half:
+        normalized_str = f"{normalized_year}-H{normalized_half}"
+    elif isinstance(raw_period, str) and raw_period.strip():
+        normalized_str = raw_period.strip()
+    else:
+        normalized_str = ''
+
+    return normalized_str, normalized_year, normalized_half
+
+
+def normalize_tpv_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize TPV entry fields in-place and return the entry."""
+
+    period, year_value, half_value = normalize_year_half(
+        entry.get('year_half_created_at'),
+        year=entry.get('year'),
+        semester=entry.get('semester'),
+    )
+
+    entry['year_half_created_at'] = period
+    if year_value:
+        entry['year'] = year_value
+    else:
+        entry.pop('year', None)
+
+    if half_value:
+        entry['semester'] = f'H{half_value}'
+    else:
+        entry.pop('semester', None)
+
+    entry['store_name'] = (entry.get('store_name') or '').strip()
+    entry['store_id'] = str(entry.get('store_id', '')).strip()
+
+    try:
+        entry['tpv'] = float(entry.get('tpv', 0.0) or 0.0)
+    except (TypeError, ValueError):
+        entry['tpv'] = 0.0
+
+    return entry
+
+
+def store_id_sort_key(value: Any) -> Tuple[int, str]:
+    text = str(value or '').strip()
+    if text.isdigit():
+        return int(text), text
+    try:
+        numeric = int(float(text))
+        return numeric, text
+    except (ValueError, TypeError):
+        return 0, text
+
+
+def tpv_sort_key(entry: Dict[str, Any]) -> Tuple[YearHalfSortKey, str, Tuple[int, str]]:
+    """Return a composite key to sort TPV rows by period, store name, then store id."""
+
+    _, year_value, half_value = normalize_year_half(
+        entry.get('year_half_created_at'),
+        year=entry.get('year'),
+        semester=entry.get('semester'),
+    )
+
+    store_name = entry.get('store_name') or ''
+    store_key = store_id_sort_key(entry.get('store_id'))
+    return (year_value, half_value), store_name, store_key
+
+
+def normalize_year_month(value: Any) -> Tuple[str, int, int]:
+    if isinstance(value, str) and value:
+        parts = value.split('-')
+        if len(parts) >= 2:
+            year = _parse_year(parts[0])
+            month = _parse_half(parts[1])
+            return f"{year:04d}-{month:02d}" if year and month else value, year, month
+        year = _parse_year(value)
+        return str(year) if year else value, year, 0
+    return '', 0, 0
+
+
+def top_items_sort_key(entry: Dict[str, Any], metric_key: str) -> Tuple[YearHalfSortKey, float, Tuple[int, str]]:
+    normalized, year, month = normalize_year_month(entry.get('year_month_created_at'))
+    if normalized:
+        entry['year_month_created_at'] = normalized
+
+    metric_value = entry.get(metric_key, 0)
+    try:
+        metric_numeric = float(metric_value)
+    except (TypeError, ValueError):
+        metric_numeric = 0.0
+
+    item_key = store_id_sort_key(entry.get('item_id'))
+    return (year, month), -metric_numeric, item_key

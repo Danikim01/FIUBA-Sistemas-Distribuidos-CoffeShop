@@ -8,7 +8,7 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping
 
 from message_utils import ClientId
-from worker_utils import run_main, safe_int_conversion
+from worker_utils import run_main, safe_int_conversion, top_items_sort_key
 from workers.aggregator.extra_source.menu_items import MenuItemsExtraSource
 from workers.top.top_worker import TopWorker
 
@@ -56,58 +56,6 @@ class FinalItemsAggregator(TopWorker):
         self._quantity_totals[client_id] = _new_quantity_totals()
         self._profit_totals[client_id] = _new_profit_totals()
 
-    def _merge_quantity_entries(self, client_id: ClientId, entries: Any) -> None:
-        if not isinstance(entries, list):
-            return
-
-        client_totals = self._quantity_totals[client_id]
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-
-            year_month = entry.get("year_month_created_at")
-            item_id = entry.get("item_id")
-            value = entry.get("sellings_qty")
-
-            if year_month is None or item_id is None or value is None:
-                continue
-
-            try:
-                normalized_item_id = int(item_id)
-                normalized_year_month = str(year_month)
-                normalized_value = int(value)
-            except (ValueError, TypeError):
-                logger.debug("Skipping invalid quantity entry: %s", entry)
-                continue
-
-            client_totals[normalized_year_month][normalized_item_id] += normalized_value
-
-    def _merge_profit_entries(self, client_id: ClientId, entries: Any) -> None:
-        if not isinstance(entries, list):
-            return
-
-        client_totals = self._profit_totals[client_id]
-        for entry in entries:
-            if not isinstance(entry, dict):
-                continue
-
-            year_month = entry.get("year_month_created_at")
-            item_id = entry.get("item_id")
-            value = entry.get("profit_sum")
-
-            if year_month is None or item_id is None or value is None:
-                continue
-
-            try:
-                normalized_item_id = int(item_id)
-                normalized_year_month = str(year_month)
-                normalized_value = float(value)
-            except (ValueError, TypeError):
-                logger.debug("Skipping invalid profit entry: %s", entry)
-                continue
-
-            client_totals[normalized_year_month][normalized_item_id] += normalized_value
-
     def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:
         if not isinstance(totals, dict):
             return
@@ -142,20 +90,12 @@ class FinalItemsAggregator(TopWorker):
                     continue
                 ym_bucket[iid] += profit
 
-    def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
-        logger.info(f"FinalItemsAggregator received payload: {payload}")
-        # Prefer exact totals if provided by replicas
-        if 'quantity_totals' in payload or 'profit_totals' in payload:
-            self._merge_quantity_totals_map(client_id, payload.get('quantity_totals'))
-            self._merge_profit_totals_map(client_id, payload.get('profit_totals'))
-            return
-
-        # Backward compatibility: merge trimmed lists (approximate)
-        self._merge_quantity_entries(client_id, payload.get('quantity'))
-        self._merge_profit_entries(client_id, payload.get('profit'))
+    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+        self._merge_quantity_totals_map(client_id, payload.get('quantity_totals'))
+        self._merge_profit_totals_map(client_id, payload.get('profit_totals'))
 
     def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
-        return self.menu_items_source.get_item(clientId, str(item_id))
+        return self.menu_items_source.get_item_when_done(clientId, str(item_id))
 
     def _build_results(
         self,
@@ -181,13 +121,7 @@ class FinalItemsAggregator(TopWorker):
                     }
                 )
 
-        results.sort(
-            key=lambda row: (
-                row["year_month_created_at"],
-                -row[metric_key],
-                row["item_id"],
-            )
-        )
+        results.sort(key=lambda row: top_items_sort_key(row, metric_key))
         return results
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:

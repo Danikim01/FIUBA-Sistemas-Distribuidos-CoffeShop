@@ -1,11 +1,9 @@
 from collections import defaultdict
-import threading
 from typing import Any, Dict, List, Tuple
 from message_utils import ClientId
 from workers.aggregator.extra_source.stores import StoresExtraSource
-from tpv_utils import normalize_tpv_entry, tpv_sort_key
 from workers.top.top_worker import TopWorker
-from worker_utils import run_main
+from worker_utils import normalize_tpv_entry, tpv_sort_key, run_main
 
 class StoreData:
     def __init__(self, year_half: str, tpv: float, store_name: str = "Unknown"):
@@ -25,7 +23,7 @@ class TPVAggregator(TopWorker):
     def reset_state(self, client_id: ClientId) -> None:
         self.recieved_payloads[client_id] = {}
 
-    def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
         store_id: StoreId = str(payload.get("store_id", ""))
         entry = StoreData(
@@ -38,7 +36,7 @@ class TPVAggregator(TopWorker):
             .append(entry)
 
     def get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
-        return self.stores_source.get_item(client_id, store_id)
+        return self.stores_source.get_item_when_done(client_id, store_id)
 
     def _aggregate_payloads(
         self,

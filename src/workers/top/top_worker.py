@@ -13,7 +13,7 @@ class TopWorker(BaseWorker):
     """Base class for single-source top workers with per-client state helpers."""
 
     @abstractmethod
-    def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
         pass
 
@@ -49,7 +49,7 @@ class TopWorker(BaseWorker):
             logger.warning("Transaction received without client metadata")
             return
 
-        self._accumulate_transaction(client_id, message)
+        self.accumulate_transaction(client_id, message)
 
     def process_batch(self, batch: Any):
         client_id = self.current_client_id or ''
@@ -58,4 +58,4 @@ class TopWorker(BaseWorker):
             return
 
         for entry in batch:
-            self._accumulate_transaction(client_id, entry)
+            self.accumulate_transaction(client_id, entry)
