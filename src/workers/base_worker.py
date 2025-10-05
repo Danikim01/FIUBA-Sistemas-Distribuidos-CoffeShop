@@ -94,15 +94,13 @@ class BaseWorker(ABC):
                 """
                 try:
                     if self.shutdown_requested:
-                        logger.info("Shutdown requested, stopping message processing")
-                        return
+                        return logger.info("Shutdown requested, stopping message processing")
                     
                     client_id, actual_data = extract_data_and_client_id(message)
                     self.current_client_id = client_id
                     
                     if is_eof_message(message):
-                        self.handle_eof(message)
-                        return
+                        return self.handle_eof(message)
 
                     logger.debug(f"Processing message for client {client_id}")
                     

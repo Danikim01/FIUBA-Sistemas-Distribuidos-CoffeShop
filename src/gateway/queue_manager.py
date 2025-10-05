@@ -211,7 +211,7 @@ class QueueManager:
     
     def send_users(self, users: List[Any], client_id: str) -> None:
         """Send users to the users processing queue with client metadata."""
-        logger.info("Processing %s users for client pipeline for client %s", len(users), client_id)
+        logger.debug("Processing %s users for client pipeline for client %s", len(users), client_id)
         
         try:
             message_with_metadata = {

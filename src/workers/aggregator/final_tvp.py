@@ -26,7 +26,9 @@ class TPVAggregator(TopWorker):
         store_id: StoreId = safe_int_conversion(payload.get("store_id"), minimum=0)
         year_half: YearHalf = payload.get("year_half_created_at", "Unknown")
         tpv: float = float(payload.get("tpv", 0.0))
-        self.recieved_payloads[client_id][year_half][store_id] += tpv
+
+        client_payloads = self.recieved_payloads.setdefault(client_id, defaultdict(lambda: defaultdict(float)))
+        client_payloads[year_half][store_id] += tpv
 
     def get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
         return self.stores_source.get_item_when_done(client_id, str(store_id))

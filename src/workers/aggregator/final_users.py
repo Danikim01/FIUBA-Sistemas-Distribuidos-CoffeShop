@@ -28,6 +28,7 @@ class TopClientsBirthdaysAggregator(TopWorker):
         self.stores_source.start_consuming()
         self.birthdays_source = UsersExtraSource(self.middleware_config)
         self.birthdays_source.start_consuming()
+        
         self.recieved_payloads: Dict[ClientId, list[dict[str, Any]]] = {}
 
     def reset_state(self, client_id: ClientId) -> None:
