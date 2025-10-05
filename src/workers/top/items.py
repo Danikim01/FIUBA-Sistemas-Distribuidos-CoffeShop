@@ -6,13 +6,13 @@ import logging
 import os
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List
+from message_utils import ClientId
 from worker_utils import extract_year_month, run_main, safe_float_conversion, safe_int_conversion
 from workers.top.top_worker import TopWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ClientId = str
 YearMonth = str
 ItemId = int
 

@@ -1,5 +1,6 @@
 import logging
 import os
+from message_utils import ClientId
 from middleware_config import MiddlewareConfig
 from workers.aggregator.extra_source.extra_source import ExtraSource
 
@@ -26,7 +27,7 @@ class ClientsExtraSource(ExtraSource):
         # Implement saving logic if required
         pass
 
-    def get_item(self, index: int = 0):
+    def get_item(self, client_id: ClientId, item_id: str) -> Any:
         """Retrieve item from the extra source.
         Returns a dict or None if out of range.
         """

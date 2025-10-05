@@ -55,31 +55,18 @@
       }
     },
     "tpv": {
-      "count": 1,
+      "count": 2,
       "environment": {
-        "INPUT_QUEUE": "transaction_time_filtered",
+        "INPUT_EXCHANGE": "transactions_time_filtered",
+        "INPUT_QUEUE": "transactions_time_filtered_tpv",
         "OUTPUT_QUEUE": "tpv_partial"
       }
     },
-    "tpv_aggregator": {
-      "count": 1,
-      "environment": {
-        "INPUT_QUEUE": "tpv_partial",
-        "OUTPUT_QUEUE": "gateway_results"
-      }
-    },
     "items_top": {
-      "count": 1,
+      "count": 2,
       "environment": {
         "INPUT_QUEUE": "transaction_items_raw",
         "OUTPUT_QUEUE": "top_items_partial"
-      }
-    },
-    "items_aggregator": {
-      "count": 1,
-      "environment": {
-        "INPUT_QUEUE": "top_items_partial",
-        "OUTPUT_QUEUE": "gateway_results"
       }
     },
     "top_clients": {
@@ -90,8 +77,19 @@
         "OUTPUT_QUEUE": "top_clients_partial"
       }
     },
+    "items_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "top_items_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
+    },
+    "tpv_aggregator": {
+      "environment": {
+        "INPUT_QUEUE": "tpv_partial",
+        "OUTPUT_QUEUE": "gateway_results"
+      }
+    },
     "top_clients_birthdays": {
-      "count": 1,
       "environment": {
         "INPUT_QUEUE": "top_clients_partial",
         "OUTPUT_QUEUE": "gateway_results"
