@@ -3,6 +3,7 @@
 import logging
 from typing import List, Any
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
+from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
 from config import GatewayConfig
 
 logger = logging.getLogger(__name__)
@@ -29,42 +30,46 @@ class QueueManager:
         """Initialize all RabbitMQ queue connections."""
         connection_params = self.config.get_rabbitmq_connection_params()
         
-        # Transactions queue
-        self.transactions_queue = RabbitMQMiddlewareQueue(
-            queue_name=self.config.transactions_queue_name,
-            **connection_params
+        # Transactions queue publisher per thread
+        self.transactions_queue = ThreadAwareQueuePublisher(
+            lambda: RabbitMQMiddlewareQueue(
+                queue_name=self.config.transactions_queue_name,
+                **connection_params,
+            )
         )
         
-        # Stores queues (multiple)
-        self.stores_exchange = RabbitMQMiddlewareExchange(
-            exchange_name=self.config.stores_exchange_name,
-            exchange_type='direct',
-            route_keys=[self.config.stores_exchange_name],
-            **connection_params
+        # Stores exchange publisher per thread
+        self.stores_exchange = ThreadAwareExchangePublisher(
+            lambda: RabbitMQMiddlewareExchange(
+                exchange_name=self.config.stores_exchange_name,
+                exchange_type='direct',
+                route_keys=[self.config.stores_exchange_name],
+                **connection_params,
+            )
         )
         
-        # Users queue
-        self.users_queue = RabbitMQMiddlewareQueue(
-            queue_name=self.config.users_queue_name,
-            **connection_params
+        # Users queue publisher per thread
+        self.users_queue = ThreadAwareQueuePublisher(
+            lambda: RabbitMQMiddlewareQueue(
+                queue_name=self.config.users_queue_name,
+                **connection_params,
+            )
         )
         
-        # Transaction items queue
-        self.transaction_items_queue = RabbitMQMiddlewareQueue(
-            queue_name=self.config.transaction_items_queue_name,
-            **connection_params
+        # Transaction items queue publisher per thread
+        self.transaction_items_queue = ThreadAwareQueuePublisher(
+            lambda: RabbitMQMiddlewareQueue(
+                queue_name=self.config.transaction_items_queue_name,
+                **connection_params,
+            )
         )
         
-        # Menu items queue
-        self.menu_items_queue = RabbitMQMiddlewareQueue(
-            queue_name=self.config.menu_items_queue_name,
-            **connection_params
-        )
-        
-        # Results queue
-        self.results_queue = RabbitMQMiddlewareQueue(
-            queue_name=self.config.results_queue_name,
-            **connection_params
+        # Menu items queue publisher per thread
+        self.menu_items_queue = ThreadAwareQueuePublisher(
+            lambda: RabbitMQMiddlewareQueue(
+                queue_name=self.config.menu_items_queue_name,
+                **connection_params,
+            )
         )
     
     def send_transactions_chunks(self, transactions: List[Any], client_id: str) -> None:
@@ -234,6 +239,21 @@ class QueueManager:
             logger.error(f"Failed to propagate EOF to menu items queue for client {client_id}: {exc}")
             raise
     
+    def close(self) -> None:
+        """Close all RabbitMQ publishers created by the manager."""
+        publishers = [
+            self.transactions_queue,
+            self.users_queue,
+            self.transaction_items_queue,
+            self.menu_items_queue,
+            self.stores_exchange,
+        ]
+        for publisher in publishers:
+            try:
+                publisher.close_all()
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Error closing publisher: %s", exc)
+
     def create_results_consumer(self) -> RabbitMQMiddlewareQueue:
         """Create a new results queue consumer."""
         connection_params = self.config.get_rabbitmq_connection_params()
