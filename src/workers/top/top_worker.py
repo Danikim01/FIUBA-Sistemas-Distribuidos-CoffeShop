@@ -32,6 +32,7 @@ class TopWorker(BaseWorker):
                 "%s emitted results for client %s",
                 self.__class__.__name__,
                 client_id,
+                payload
             )
         
         self.eof_handler.handle_eof(message, client_id, callback=callback)

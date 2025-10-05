@@ -86,15 +86,26 @@ class TopItemsWorker(TopWorker):
         return results
 
     def create_payload(self, client_id: str) -> List[Dict[str, Any]]:
+        """Emit per-replica totals so the aggregator can compute exact top-K.
+
+        We send full per-month per-item totals for both quantity and profit,
+        allowing the final aggregator to merge across replicas without loss.
+        """
         quantity_totals = self._quantity_totals.pop(client_id, {})
         profit_totals = self._profit_totals.pop(client_id, {})
 
-        quantity_results = self._build_results(quantity_totals, 'sellings_qty')
-        profit_results = self._build_results(profit_totals, 'profit_sum')
+        # Convert defaultdict structures into plain dicts for serialization
+        q_out: Dict[str, Dict[int, int]] = {}
+        for ym, items_map in quantity_totals.items():
+            q_out[str(ym)] = {int(item_id): int(value) for item_id, value in items_map.items()}
+
+        p_out: Dict[str, Dict[int, float]] = {}
+        for ym, items_map in profit_totals.items():
+            p_out[str(ym)] = {int(item_id): float(value) for item_id, value in items_map.items()}
 
         payload = {
-            'quantity': quantity_results,
-            'profit': profit_results,
+            'quantity_totals': q_out,
+            'profit_totals': p_out,
         }
 
         return [payload]

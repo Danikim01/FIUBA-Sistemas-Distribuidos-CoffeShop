@@ -100,9 +100,50 @@ class FinalItemsAggregator(TopWorker):
 
             client_totals[normalized_year_month][normalized_item_id] += normalized_value
 
+    def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:
+        if not isinstance(totals, dict):
+            return
+        client_totals = self._quantity_totals[client_id]
+        for year_month, items_map in totals.items():
+            if not isinstance(items_map, dict):
+                continue
+            ym = str(year_month)
+            ym_bucket = client_totals[ym]
+            for item_id, value in items_map.items():
+                try:
+                    iid = int(item_id)
+                    qty = int(value)
+                except (TypeError, ValueError):
+                    continue
+                ym_bucket[iid] += qty
+
+    def _merge_profit_totals_map(self, client_id: ClientId, totals: Any) -> None:
+        if not isinstance(totals, dict):
+            return
+        client_totals = self._profit_totals[client_id]
+        for year_month, items_map in totals.items():
+            if not isinstance(items_map, dict):
+                continue
+            ym = str(year_month)
+            ym_bucket = client_totals[ym]
+            for item_id, value in items_map.items():
+                try:
+                    iid = int(item_id)
+                    profit = float(value)
+                except (TypeError, ValueError):
+                    continue
+                ym_bucket[iid] += profit
+
     def _accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
-        self._merge_quantity_entries(client_id, payload.get("quantity"))
-        self._merge_profit_entries(client_id, payload.get("profit"))
+        # Prefer exact totals if provided by replicas
+        if 'quantity_totals' in payload or 'profit_totals' in payload:
+            self._merge_quantity_totals_map(client_id, payload.get('quantity_totals'))
+            self._merge_profit_totals_map(client_id, payload.get('profit_totals'))
+            return
+
+        # Backward compatibility: merge trimmed lists (approximate)
+        self._merge_quantity_entries(client_id, payload.get('quantity'))
+        self._merge_profit_entries(client_id, payload.get('profit'))
 
     def _build_results(
         self,

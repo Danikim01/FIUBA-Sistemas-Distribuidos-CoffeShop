@@ -63,7 +63,7 @@
       }
     },
     "items_top": {
-      "count": 2,
+      "count": 3,
       "environment": {
         "INPUT_QUEUE": "transaction_items_raw",
         "OUTPUT_QUEUE": "top_items_partial"

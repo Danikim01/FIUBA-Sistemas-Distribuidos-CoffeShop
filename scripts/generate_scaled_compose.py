@@ -62,9 +62,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "display_name": "TPV Workers",
         "base_service_name": "tpv-worker",
         "command": ["python", "top/tpv.py"],
-        "needs_worker_id": False,
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
-        "scalable": False,
+        "needs_worker_id": True,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "scalable": True,
     },
     "tpv_aggregator": {
         "display_name": "TPV Aggregator",
@@ -78,9 +78,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "display_name": "Top Items Workers",
         "base_service_name": "items-top-worker",
         "command": ["python", "top/items.py"],
-        "needs_worker_id": False,
+        "needs_worker_id": True,
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
-        "scalable": False,
+        "scalable": True,
     },
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
@@ -94,9 +94,9 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "display_name": "Top Clients Workers",
         "base_service_name": "top-clients-worker",
         "command": ["python", "top/clients.py"],
-        "needs_worker_id": False,
+        "needs_worker_id": True,
         "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
-        "scalable": False,
+        "scalable": True,
     },
     "top_clients_birthdays": {
         "display_name": "Top Clients Birthdays Aggregator",
@@ -327,8 +327,10 @@ def load_worker_settings(raw_workers: Mapping[str, Any]) -> Dict[str, WorkerConf
 
         count_value = worker_cfg.get("count")
         if count_value is None:
-            raise SystemExit(f"Worker '{name}' configuration is missing 'count'")
-        count = ensure_int(count_value, f"Worker '{name}' count")
+            default_count = 1 if not meta["scalable"] else 1
+            count = default_count
+        else:
+            count = ensure_int(count_value, f"Worker '{name}' count", allow_zero=False)
 
         env_cfg = ensure_mapping(worker_cfg.get("environment"), f"Worker '{name}' environment")
         environment = {key: str(value) for key, value in (env_cfg or {}).items()}
