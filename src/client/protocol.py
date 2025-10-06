@@ -2,8 +2,48 @@ import socket
 from enum import IntEnum
 from typing import List, Dict, Any
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+
+class ConnectionCircuitBreaker:
+    """Circuit breaker pattern for socket connections to handle failures gracefully."""
+    
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 30):
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.failure_count = 0
+        self.last_failure_time = 0
+        self.state = 'CLOSED'  # CLOSED, OPEN, HALF_OPEN
+        
+    def can_attempt(self) -> bool:
+        """Check if we can attempt an operation."""
+        if self.state == 'CLOSED':
+            return True
+        elif self.state == 'OPEN':
+            if time.time() - self.last_failure_time > self.recovery_timeout:
+                self.state = 'HALF_OPEN'
+                return True
+            return False
+        else:  # HALF_OPEN
+            return True
+    
+    def record_success(self):
+        """Record a successful operation."""
+        self.failure_count = 0
+        self.state = 'CLOSED'
+    
+    def record_failure(self):
+        """Record a failed operation."""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        
+        if self.failure_count >= self.failure_threshold:
+            self.state = 'OPEN'
+            logger.warning(f"Circuit breaker opened after {self.failure_count} failures")
+
+# Global circuit breaker for socket operations
+_circuit_breaker = ConnectionCircuitBreaker()
 
 def pack_uint32(value: int) -> bytes:
     """Pack 32-bit unsigned integer to bytes (big-endian)"""
@@ -51,23 +91,43 @@ class ResponseCode(IntEnum):
     ERROR = 1
 
 def send_all(sock: socket.socket, data: bytes) -> None:
-    """Send all data through socket"""
-    total_sent = 0
-    while total_sent < len(data):
-        sent = sock.send(data[total_sent:])
-        if sent == 0:
-            raise ConnectionError("Socket connection broken")
-        total_sent += sent
+    """Send all data through socket with circuit breaker protection"""
+    if not _circuit_breaker.can_attempt():
+        raise ConnectionError("Circuit breaker is open - too many recent failures")
+    
+    try:
+        total_sent = 0
+        while total_sent < len(data):
+            sent = sock.send(data[total_sent:])
+            if sent == 0:
+                raise ConnectionError("Socket connection broken")
+            total_sent += sent
+        
+        _circuit_breaker.record_success()
+        
+    except Exception as e:
+        _circuit_breaker.record_failure()
+        raise ConnectionError(f"Failed to send data: {e}")
 
 def recv_all(sock: socket.socket, length: int) -> bytes:
-    """Receive exact amount of data from socket"""
-    data = b''
-    while len(data) < length:
-        chunk = sock.recv(length - len(data))
-        if not chunk:
-            raise ConnectionError("Socket connection broken")
-        data += chunk
-    return data
+    """Receive exact amount of data from socket with circuit breaker protection"""
+    if not _circuit_breaker.can_attempt():
+        raise ConnectionError("Circuit breaker is open - too many recent failures")
+    
+    try:
+        data = b''
+        while len(data) < length:
+            chunk = sock.recv(length - len(data))
+            if not chunk:
+                raise ConnectionError("Socket connection broken")
+            data += chunk
+        
+        _circuit_breaker.record_success()
+        return data
+        
+    except Exception as e:
+        _circuit_breaker.record_failure()
+        raise ConnectionError(f"Failed to receive data: {e}")
 
 def serialize_transaction(row: Dict[str, Any]) -> bytes:
     """Serialize transaction row to bytes"""
