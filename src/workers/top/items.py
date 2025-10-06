@@ -80,6 +80,9 @@ class TopItemsWorker(TopWorker):
         quantity_totals = self._quantity_totals.pop(client_id, {})
         profit_totals = self._profit_totals.pop(client_id, {})
 
+        if not quantity_totals and not profit_totals:
+            return []
+
         # Convert defaultdict structures into plain dicts for serialization
         q_out: Dict[str, Dict[int, int]] = {}
         for ym, items_map in quantity_totals.items():
