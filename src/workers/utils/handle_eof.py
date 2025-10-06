@@ -7,14 +7,13 @@ from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
 logger = logging.getLogger(__name__)
 
-Counter = Dict[int, int]  # [worker_id, count]
+Counter = Dict[str, int]  # [worker_id, count]
 
 class EOFHandler:
     def __init__(self, middleware_config: MiddlewareConfig):
-        self.worker_id: int = int(os.getenv('WORKER_ID', '0'))
+        self.worker_id: str = str(os.getenv('WORKER_ID', '0'))
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
-        # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '5'))
-        self.max_retries: int = self.replica_count * 2
+        # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '100')) * self.replica_count
         
         self.middleware_config = middleware_config
         self._queue_requeue_middleware: RabbitMQMiddlewareQueue = self.get_input_queue()
@@ -47,7 +46,7 @@ class EOFHandler:
             Counter dictionary
         """
         additional_data: Dict[str, Any] = extract_eof_metadata(message)
-        counter: Dict[int, int] = additional_data.get('counter', {})
+        counter: Dict[str, int] = additional_data.get('counter', {})
         counter[self.worker_id] = counter.get(self.worker_id, 0) + 1
         return counter
 
@@ -61,8 +60,8 @@ class EOFHandler:
         """
         if len(counter) >= self.replica_count:
             return True
-        if any(count >= self.max_retries for count in counter.values()):
-            return True
+        # if any(count >= self.max_retries for count in counter.values()):
+        #     return True
         return False
 
     def output_eof(self, client_id: ClientId):
