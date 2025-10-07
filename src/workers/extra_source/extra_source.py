@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import logging
 import threading
+from typing import Any
 from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from workers.extra_source.done import Done
@@ -44,8 +45,8 @@ class ExtraSource(ABC):
                     self.clients_done.set_done(client_id)
                     return
 
-                self.save_message(data)
-                
+                self._handle_data(data)
+
             except Exception as e:
                 logger.error(f"Error interno iniciando consumo: Error procesando mensaje: {e}")
 
@@ -59,8 +60,15 @@ class ExtraSource(ABC):
         if not self.consuming_thread.is_alive():
             self.consuming_thread.start()
 
+    def _handle_data(self, data: Any):
+        if isinstance(data, list):
+            return self.save_batch(data)
+        if isinstance(data, dict):
+            return self.save_data(data)
+        logger.warning(f"Unexpected data type in extra source {self.name}: {type(data)}")
+
     @abstractmethod
-    def save_message(self, data: dict):
+    def save_data(self, data: dict):
         """Handle and persist a message from the extra source.
         
         Args:
@@ -69,7 +77,20 @@ class ExtraSource(ABC):
         raise NotImplementedError
     
     @abstractmethod
+    def save_batch(self, data: list):
+        """Handle and persist a batch of messages from the extra source.
+
+        Args:
+            message: The message to handle
+        """
+        raise NotImplementedError
+    
+    @abstractmethod
     def _get_item(self, client_id: ClientId, item_id: str) -> str:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def reset_state(self, client_id: ClientId):
         raise NotImplementedError
 
     def get_item_when_done(
