@@ -20,6 +20,7 @@ class AggregatorWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         self.chunk_payload: bool = True
+        self.chunk_size: int = 5000
 
     @abstractmethod
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -59,7 +60,7 @@ class AggregatorWorker(BaseWorker):
             if self.chunk_payload:
                 self.send_payload(payload, self.current_client_id)
             else:
-                chunked_payloads = self._chunk_payload(payload, 5000)
+                chunked_payloads = self._chunk_payload(payload, self.chunk_size)
                 for chunk in chunked_payloads:
                     self.send_payload(chunk, self.current_client_id)
 
@@ -72,6 +73,7 @@ class AggregatorWorker(BaseWorker):
         for entry in batch:
             self.accumulate_transaction(self.current_client_id, entry)
 
-    def _chunk_payload(self, payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:
+    @staticmethod
+    def _chunk_payload(payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:
         """Chunk the payload into smaller lists of a given size."""
         return [payload[i:i + chunk_size] for i in range(0, len(payload), chunk_size)]
