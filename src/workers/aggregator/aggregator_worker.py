@@ -20,7 +20,7 @@ class AggregatorWorker(BaseWorker):
     def __init__(self) -> None:
         super().__init__()
         self.chunk_payload: bool = True
-        self.chunk_size: int = 5000
+        self.chunk_size: int = 1000
 
     @abstractmethod
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -46,10 +46,11 @@ class AggregatorWorker(BaseWorker):
         type_metadata = self.gateway_type_metadata()
         self.send_message(data=payload, type_metadata=type_metadata)
         logger.info(
-            "%s emitted %s result(s) for client %s",
+            "%s emitted %s result(s) for client %s\n%s",
             self.__class__.__name__,
             get_payload_len(payload),
             client_id,
+            payload,
         )
 
     # @override

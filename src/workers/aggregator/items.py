@@ -92,8 +92,8 @@ class ItemsWorker(AggregatorWorker):
             p_out[str(ym)] = {int(item_id): float(value) for item_id, value in items_map.items()}
 
         payload = {
-            'quantity_totals': q_out,
-            'profit_totals': p_out,
+            'quantity': q_out,
+            'profit': p_out,
         }
 
         return [payload]

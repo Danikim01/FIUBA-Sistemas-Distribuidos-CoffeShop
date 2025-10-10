@@ -97,8 +97,8 @@ class FinalItemsAggregator(AggregatorWorker):
                 ym_bucket[iid] += profit
 
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
-        self._merge_quantity_totals_map(client_id, payload.get('quantity_totals'))
-        self._merge_profit_totals_map(client_id, payload.get('profit_totals'))
+        self._merge_quantity_totals_map(client_id, payload.get('quantity'))
+        self._merge_profit_totals_map(client_id, payload.get('profit'))
 
     def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
         return self.menu_items_source.get_item_when_done(clientId, str(item_id))

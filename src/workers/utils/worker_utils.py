@@ -350,8 +350,8 @@ def get_payload_len(payload: List[Dict[str, Any]]) -> int:
         return 0
 
     item0 = payload[0]
-    qty = item0.get("quantity_totals")
-    prof = item0.get("profit_totals")
+    qty = item0.get("quantity")
+    prof = item0.get("profit")
 
     is_items_payload: bool = (
         len(payload) == 1
