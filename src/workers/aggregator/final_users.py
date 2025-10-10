@@ -22,6 +22,8 @@ class TopClientsBirthdaysAggregator(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
+        self.is_aggregator = True
+        
         self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
 
         self.stores_source = StoresExtraSource(self.middleware_config)

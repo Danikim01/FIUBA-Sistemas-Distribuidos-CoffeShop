@@ -38,6 +38,8 @@ class FinalItemsAggregator(TopWorker):
 
     def __init__(self) -> None:
         super().__init__()
+        self.is_aggregator = True
+
         self.top_per_month = safe_int_conversion(os.getenv("TOP_ITEMS_COUNT"), default=1)
 
         self._quantity_totals: DefaultDict[ClientId, QuantityTotals]

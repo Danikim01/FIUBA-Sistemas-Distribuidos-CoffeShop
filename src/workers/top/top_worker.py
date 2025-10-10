@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from abc import abstractmethod
 from asyncio.log import logger
-from typing import Any, Dict, Iterable, List, TypeVar
+from typing import Any, Dict, TypeVar
 
 from message_utils import ClientId
-from worker_utils import get_payload_len, safe_int_conversion
+from worker_utils import get_payload_len
 from workers.base_worker import BaseWorker
 
 StateDict = Dict[str, Any]
@@ -20,6 +19,7 @@ class TopWorker(BaseWorker):
 
     def __init__(self) -> None:
         super().__init__()
+        self.is_aggregator = False
 
     @abstractmethod
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -56,8 +56,11 @@ class TopWorker(BaseWorker):
         payload = self.create_payload(self.current_client_id)
         if payload:
             self.reset_state(self.current_client_id)
-            for item in payload:
-                self.send_payload([item], self.current_client_id)
+            if self.is_aggregator:
+                self.send_payload(payload, self.current_client_id)
+            else:
+                for item in payload:
+                    self.send_payload([item], self.current_client_id)
 
         super().handle_eof(message)
 

@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 class TPVAggregator(TopWorker): 
     def __init__(self) -> None:
         super().__init__()
+        self.is_aggregator = True
+        
         self.stores_source = StoresExtraSource(self.middleware_config)
         self.stores_source.start_consuming()
         
