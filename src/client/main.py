@@ -43,7 +43,7 @@ class CoffeeShopClient:
         )
         
         # Initialize results handler
-        self.results_handler = ResultsHandler()
+        self.results_handler = ResultsHandler(self.data_processor.data_dir)
         
         # Initialize connection
         gateway_host, gateway_port = self.config.get_gateway_address()

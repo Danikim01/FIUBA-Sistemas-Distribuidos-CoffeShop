@@ -6,18 +6,24 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from results_validator import ResultsValidator
+
 logger = logging.getLogger(__name__)
 
 class ResultsHandler:
     """Handles result processing and stores formatted output into files."""
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: os.PathLike[str] | str) -> None:
         self.queries_expected = int(os.getenv("QUERIES_EXPECTED", "4")) # Default to 4 queries
         self.queries_completed = 0
         self.query1_items_received = 0
         
         self.results_dir = Path(".results")
         self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        self.validator = ResultsValidator(data_dir)
+        self._amount_validation_pending = False
+        self._amount_validation_finalized = False
 
         self._file_headers: Dict[str, List[str]] = {
             "amount_filter_transactions.txt": [
@@ -61,6 +67,10 @@ class ResultsHandler:
         """Reset state for a new session."""
         self.queries_completed = 0
         self.query1_items_received = 0
+        if self.validator.enabled:
+            self.validator.reset()
+        self._amount_validation_pending = False
+        self._amount_validation_finalized = False
         logger.info("Results handler state reset for new session")
 
     def _initialize_client_files(self, client_id: str) -> Path:
@@ -107,7 +117,46 @@ class ResultsHandler:
 
         return file_path
 
-    def _render_amount_transactions(self, payload: Dict[str, Any], client_id: str) -> None:
+    def _validate_result(
+        self,
+        result_type: str,
+        rows: Iterable[Dict[str, Any]],
+        *,
+        final: bool = True,
+    ) -> None:
+        """Send rows to the validator and log the outcome if enabled."""
+
+        if not self.validator.enabled:
+            return
+
+        outcome = self.validator.validate(result_type, rows, final=final)
+
+        if not final or not outcome:
+            return
+
+        success, detail = outcome
+        label = self.validator.get_label(result_type)
+        if success:
+            logger.info("Validación exitosa (%s): %s", label, detail)
+        else:
+            logger.error("Validación fallida (%s): %s", label, detail)
+
+        if result_type == "AMOUNT_FILTER_TRANSACTIONS":
+            self._amount_validation_finalized = True
+            self._amount_validation_pending = False
+
+    def _finalize_amount_transactions_validation(self) -> None:
+        """Ensure the accumulated amount-filter results are validated once."""
+
+        if not self.validator.enabled:
+            return
+
+        if self._amount_validation_finalized or not self._amount_validation_pending:
+            return
+
+        self._validate_result("AMOUNT_FILTER_TRANSACTIONS", [], final=True)
+
+    def _render_amount_transactions(self, payload: Dict[str, Any], client_id: str) -> List[Dict[str, Any]]:
         """Persist amount-filtered transactions into a dedicated file."""
 
         transactions = payload.get("data") or payload.get("results") or []
@@ -121,17 +170,18 @@ class ResultsHandler:
         total = len(transactions)
         body_lines: List[str] = []
         for transaction in transactions:
-                transaction_id = transaction.get("transaction_id", "desconocido")
-                final_amount_raw = transaction.get("final_amount")
-                try:
-                    amount_value = float(final_amount_raw)
-                    amount_str = f"{amount_value:.2f}"
-                except (TypeError, ValueError):
-                    amount_str = "0.00"
-                body_lines.append(f"{transaction_id} - {amount_str}")
+            transaction_id = transaction.get("transaction_id", "desconocido")
+            final_amount_raw = transaction.get("final_amount")
+            try:
+                amount_value = float(final_amount_raw)
+                amount_str = f"{amount_value:.2f}"
+            except (TypeError, ValueError):
+                amount_str = "0.00"
+            body_lines.append(f"{transaction_id} - {amount_str}")
 
         self._append_to_file("amount_filter_transactions.txt", body_lines, client_id)
         self.query1_items_received += total
+        return transactions
 
     def _render_top_items_table(
         self,
@@ -140,7 +190,7 @@ class ResultsHandler:
         metric_key: str,
         filename: str,
         client_id: str,
-    ) -> None:
+    ) -> List[Dict[str, Any]]:
         """Render generic top items results into the corresponding file."""
 
         rows = payload.get("results") or []
@@ -178,8 +228,9 @@ class ResultsHandler:
             body_lines.append("-" * 50)
 
         self._append_to_file(filename, body_lines, client_id)
+        return rows
 
-    def _render_top_clients_birthdays(self, payload: Dict[str, Any], client_id: str) -> None:
+    def _render_top_clients_birthdays(self, payload: Dict[str, Any], client_id: str) -> List[Dict[str, Any]]:
         """Persist top clients birthdays into the results folder."""
 
         rows = payload.get("results") or []
@@ -198,24 +249,36 @@ class ResultsHandler:
             body_lines.append("Sin registros que cumplan las condiciones.")
             body_lines.append("-" * 50)
         else:
-            body_lines.append("user_id - store_name - birthdate - purchases_qty")
-            for row in rows:
-                user_id = row.get("user_id", "")
-                store_name = row.get("store_name", "")
+            # Sort by store name and birthdate, mimicking expected display
+            sorted_rows = sorted(
+                rows,
+                key=lambda row: (
+                    row.get("store_name", ""),
+                    str(row.get("birthdate", "")),
+                ),
+            )
+
+            per_store_counters: Dict[str, int] = {}
+            body_lines.append("store_name - birthdate")
+            for row in sorted_rows:
+                store_name = row.get("store_name", "Desconocido")
                 birthdate = row.get("birthdate", "")
-                purchases_qty = row.get("purchases_qty", 0)
-                try:
-                    purchases_str = f"{int(purchases_qty)}"
-                except (TypeError, ValueError):
-                    purchases_str = "0"
-                body_lines.append(
-                    f"{user_id} - {store_name} - {birthdate} - {purchases_str}"
-                )
+
+                store_counter = per_store_counters.get(store_name, 0)
+                if store_counter >= 3:
+                    continue
+
+                per_store_counters[store_name] = store_counter + 1
+                birthdate_str = str(birthdate) if birthdate is not None else ""
+                body_lines.append(f"{store_name} - {birthdate_str}")
+
             body_lines.append("-" * 50)
 
         self._append_to_file("top_clients_birthdays.txt", body_lines, client_id)
 
-    def _render_tpv_summary(self, payload: Dict[str, Any], client_id: str) -> None:
+        return rows
+
+    def _render_tpv_summary(self, payload: Dict[str, Any], client_id: str) -> List[Dict[str, Any]]:
         """Persist TPV summary results."""
 
         results = payload.get("results") or []
@@ -252,6 +315,8 @@ class ResultsHandler:
 
         self._append_to_file("tpv_summary.txt", body_lines, client_id)
 
+        return results
+
     def handle_single_result(self, result: Dict[str, Any]) -> bool:
         """Process a single result message.
 
@@ -278,33 +343,46 @@ class ResultsHandler:
         normalized_type = str(message_type).upper() if message_type else ""
 
         if normalized_type == "EOF":
+            self._finalize_amount_transactions_validation()
             return False
         if normalized_type == "TPV_SUMMARY":
-            self._render_tpv_summary(result, client_id)
+            rendered = self._render_tpv_summary(result, client_id)
+            self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_ITEMS_BY_QUANTITY":
-            self._render_top_items_table(
+            rendered = self._render_top_items_table(
                 result,
                 "TOP ÍTEMS POR CANTIDAD (2024-2025, 06:00-23:00)",
                 "sellings_qty",
                 "top_items_by_quantity.txt",
                 client_id,
             )
+            self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_ITEMS_BY_PROFIT":
-            self._render_top_items_table(
+            rendered = self._render_top_items_table(
                 result,
                 "TOP ÍTEMS POR GANANCIA (2024-2025, 06:00-23:00)",
                 "profit_sum",
                 "top_items_by_profit.txt",
                 client_id,
             )
+            self._validate_result(normalized_type, rendered or [])
             return True
         if normalized_type == "TOP_CLIENTS_BIRTHDAYS":
-            self._render_top_clients_birthdays(result, client_id)
+            rendered = self._render_top_clients_birthdays(result, client_id)
+            self._validate_result(normalized_type, rendered or [])
             return True
-        if normalized_type in {"AMOUNT_FILTER_TRANSACTIONS", "AMOUNT_FILTER_SUMMARY"}:
-            self._render_amount_transactions(result, client_id)
+        if normalized_type == "AMOUNT_FILTER_TRANSACTIONS":
+            rendered = self._render_amount_transactions(result, client_id)
+            self._amount_validation_pending = True
+            self._validate_result("AMOUNT_FILTER_TRANSACTIONS", rendered or [], final=False)
+            return True
+        if normalized_type == "AMOUNT_FILTER_SUMMARY":
+            summary_rows = result.get("results")
+            if not isinstance(summary_rows, list):
+                summary_rows = []
+            self._validate_result("AMOUNT_FILTER_TRANSACTIONS", summary_rows or [], final=True)
             return True
 
         logger.debug("Resultado no reconocido, se omite: %s", result)
@@ -367,4 +445,5 @@ class ResultsHandler:
         except Exception as exc:  # noqa: BLE001
             logger.error(f"Error while listening for results: {exc}")
         finally:
+            self._finalize_amount_transactions_validation()
             logger.info(f"Total query 1 results received: {self.query1_items_received}")
