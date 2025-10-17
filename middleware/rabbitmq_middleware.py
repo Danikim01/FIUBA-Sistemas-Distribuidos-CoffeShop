@@ -110,7 +110,8 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
 
         def _stop() -> None:
             with suppress(Exception):
-                channel.stop_consuming()
+                if channel and not channel.is_closed:
+                    channel.stop_consuming()
 
         if connection and not connection.is_closed:
             try:
@@ -132,13 +133,15 @@ class _BaseRabbitMQMiddleware(MessageMiddleware):
         self._stop_event.set()
         self._stop_consuming_threadsafe()
 
+        # Clear active channel before closing connection
+        self._clear_active_channel()
+        self.consuming = False
+
         try:
             self._connection_manager.close()
         except Exception as exc:  # noqa: BLE001
-            raise MessageMiddlewareCloseError(f"Error cerrando conexión: {exc}") from exc
-        finally:
-            self._clear_active_channel()
-            self.consuming = False
+            logger.warning(f"Error cerrando conexión: {exc}")
+            # Don't raise exception during shutdown
 
 
 class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
@@ -249,6 +252,13 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
                 )
             except pika.exceptions.AMQPConnectionError as exc:
                 logger.warning("Conexión perdida con RabbitMQ: %s. Reintentando...", exc)
+            except OSError as exc:
+                if exc.errno == 9:  # Bad file descriptor
+                    logger.info("Conexión cerrada durante shutdown, terminando consumo")
+                    break
+                else:
+                    logger.exception("Error de sistema en '%s': %s", self.queue_name, exc)
+                    raise MessageMiddlewareMessageError(f"Error de sistema: {exc}") from exc
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error interno iniciando consumo en '%s': %s", self.queue_name, exc)
                 raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc
@@ -475,6 +485,13 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
                 )
             except pika.exceptions.AMQPConnectionError as exc:
                 logger.warning("Conexión perdida con RabbitMQ: %s. Reintentando...", exc)
+            except OSError as exc:
+                if exc.errno == 9:  # Bad file descriptor
+                    logger.info("Conexión cerrada durante shutdown, terminando consumo")
+                    break
+                else:
+                    logger.exception("Error de sistema en '%s': %s", self.exchange_name, exc)
+                    raise MessageMiddlewareMessageError(f"Error de sistema: {exc}") from exc
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error interno iniciando consumo en '%s': %s", self.exchange_name, exc)
                 raise MessageMiddlewareMessageError(f"Error interno iniciando consumo: {exc}") from exc

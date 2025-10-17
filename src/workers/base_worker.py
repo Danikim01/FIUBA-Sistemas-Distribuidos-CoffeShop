@@ -46,8 +46,17 @@ class BaseWorker(ABC):
             signum: Signal number
             frame: Current stack frame
         """
-        logger.info("SIGTERM received, initiating graceful shutdown...", signum, frame)
+        logger.info("SIGTERM received, initiating graceful shutdown...")
         self.shutdown_requested = True
+        
+        # Stop consuming immediately to prevent new messages
+        try:
+            if hasattr(self.middleware_config, 'input_middleware'):
+                self.middleware_config.input_middleware.stop_consuming()
+        except Exception as e:
+            logger.warning(f"Error stopping consumption: {e}")
+        
+        # Clean up resources
         self.cleanup()
     
     def send_message(self, data: Any, **metadata):
