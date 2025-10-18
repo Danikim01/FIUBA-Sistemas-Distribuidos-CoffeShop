@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from contextlib import suppress
 from typing import Any, Dict
 from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata
 from middleware_config import MiddlewareConfig
@@ -18,12 +19,18 @@ class EOFHandler:
         # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '100')) * self.replica_count
         
         self.middleware_config = middleware_config
-        self.eof_requeue: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
+        self.eof_consumer: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
         self.consuming_thread = None
+
+        self._thread_local = threading.local()
+        self._publishers_lock = threading.Lock()
+        self._output_publishers: list = []
+        self._requeue_publishers: list[RabbitMQMiddlewareQueue] = []
 
     def handle_eof(
         self,
         message: Dict[str, Any],
+        client_id: ClientId,
     ) -> None:
         """Handle EOF message. Can be overridden by subclasses.
         
@@ -31,7 +38,7 @@ class EOFHandler:
             message: EOF message dictionary
             callback: Optional callback to execute before outputting EOF
         """
-        client_id, message = extract_data_and_client_id(message)
+        _, message = extract_data_and_client_id(message)
 
         counter = self.get_counter(message)
 
@@ -76,7 +83,8 @@ class EOFHandler:
             additional_data: Additional data to include in EOF message
         """
         message = create_message_with_metadata(client_id, data=None, message_type='EOF')
-        self.middleware_config.output_middleware.send(message)
+        publisher = self._get_output_publisher()
+        publisher.send(message)
 
     def requeue_eof(self, client_id: ClientId, counter: Counter):
         """Requeue an EOF message back to the input middleware.
@@ -90,24 +98,54 @@ class EOFHandler:
             message_type='EOF',
             counter=dict(counter),
         )
-        self.eof_requeue.send(message)
+        publisher = self._get_requeue_publisher()
+        publisher.send(message)
+
+    def _get_output_publisher(self):
+        publisher = getattr(self._thread_local, "output_publisher", None)
+        if publisher is None:
+            publisher = self.middleware_config._create_output_middleware()
+            setattr(self._thread_local, "output_publisher", publisher)
+            with self._publishers_lock:
+                self._output_publishers.append(publisher)
+        return publisher
+
+    def _get_requeue_publisher(self) -> RabbitMQMiddlewareQueue:
+        publisher = getattr(self._thread_local, "requeue_publisher", None)
+        if publisher is None:
+            publisher = self.middleware_config.create_eof_requeue()
+            setattr(self._thread_local, "requeue_publisher", publisher)
+            with self._publishers_lock:
+                self._requeue_publishers.append(publisher)
+        return publisher
 
     def start_consuming(self, on_message):
         """Start the consuming thread."""
-        if not self.consuming_thread:
+        def _start_consuming():
+            try:
+                self.eof_consumer.start_consuming(on_message)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Error consuming EOF messages: %s", exc)
+            finally:
+                self.consuming_thread = None
+        if not self.consuming_thread or not self.consuming_thread.is_alive():
             logger.info("Starting EOF handler consuming thread")
-            def _start_consuming():
-                try:
-                    self.eof_requeue.start_consuming(on_message)
-                except Exception as exc:  # noqa: BLE001
-                    logger.error(f"Error consuming EOF messages: {exc}")
             self.consuming_thread = threading.Thread(target=_start_consuming, daemon=True)
             self.consuming_thread.start()
 
     def cleanup(self) -> None:
         try:
-            self.eof_requeue.close()
+            self.eof_consumer.close()
+            with self._publishers_lock:
+                publishers = list(self._output_publishers) + list(self._requeue_publishers)
+                self._output_publishers.clear()
+                self._requeue_publishers.clear()
+
+            for publisher in publishers:
+                with suppress(Exception):
+                    publisher.close()
+
             if self.consuming_thread and self.consuming_thread.is_alive():
                 self.consuming_thread.join(timeout=10.0)
         except Exception as exc:  # noqa: BLE001
-            logger.debug("Error closing requeue middleware: %s", exc)
+            logger.debug("Error closing EOF Handler: %s", exc)

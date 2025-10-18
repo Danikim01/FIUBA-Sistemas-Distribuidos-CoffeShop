@@ -59,17 +59,17 @@ class MiddlewareConfig:
             prefetch_count=self.prefetch_count
         )
 
-    def create_queue(self, name: str) -> RabbitMQMiddlewareQueue:
+    def create_queue(self, name: str, prefetch_count: int | None = None) -> RabbitMQMiddlewareQueue:
         return RabbitMQMiddlewareQueue(
             host=self.rabbitmq_host,
             queue_name=name,
             port=self.rabbitmq_port,
-            prefetch_count=self.prefetch_count
+            prefetch_count=prefetch_count or self.prefetch_count
         )
     
     def create_eof_requeue(self) -> RabbitMQMiddlewareQueue:
         name = self.input_queue + '_eof_requeue'
-        return self.create_queue(name)
+        return self.create_queue(name, 1)
 
     def get_input_target(self) -> str:
         if self.has_input_exchange():

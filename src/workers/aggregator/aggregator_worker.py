@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import abstractmethod
 from asyncio.log import logger
+import threading
 from typing import Any, Dict, TypeVar
 
 from message_utils import ClientId
@@ -21,6 +22,7 @@ class AggregatorWorker(BaseWorker):
         super().__init__()
         self.chunk_payload: bool = True
         self.chunk_size: int = 1000
+        self._state_lock = threading.RLock()
 
     @abstractmethod
     def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
@@ -44,7 +46,7 @@ class AggregatorWorker(BaseWorker):
     def send_payload(self, payload: list[Dict[str, Any]], client_id: ClientId):
         """Send the payload to the output middleware."""
         type_metadata = self.gateway_type_metadata()
-        self.send_message(data=payload, type_metadata=type_metadata)
+        self.send_message(client_id=client_id, data=payload, type_metadata=type_metadata)
         logger.info(
             "%s emitted %s result(s) for client %s\n%s",
             self.__class__.__name__,
@@ -54,25 +56,30 @@ class AggregatorWorker(BaseWorker):
         )
 
     # @override
-    def handle_eof(self, message: Dict[str, Any]):
-        payload = self.create_payload(self.current_client_id)
-        if payload:
-            self.reset_state(self.current_client_id)
-            if self.chunk_payload:
-                self.send_payload(payload, self.current_client_id)
-            else:
-                chunked_payloads = self._chunk_payload(payload, self.chunk_size)
-                for chunk in chunked_payloads:
-                    self.send_payload(chunk, self.current_client_id)
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        payload_batches: list[list[Dict[str, Any]]] = []
+        with self._state_lock:
+            payload = self.create_payload(client_id)
+            if payload:
+                self.reset_state(client_id)
+                if self.chunk_payload:
+                    payload_batches = [payload]
+                else:
+                    payload_batches = self._chunk_payload(payload, self.chunk_size)
 
-        super().handle_eof(message)
+        for chunk in payload_batches:
+            self.send_payload(chunk, client_id)
 
-    def process_message(self, message: dict):
-        self.accumulate_transaction(self.current_client_id, message)
+        super().handle_eof(message, client_id)
 
-    def process_batch(self, batch: list):
-        for entry in batch:
-            self.accumulate_transaction(self.current_client_id, entry)
+    def process_message(self, message: dict, client_id: ClientId):
+        with self._state_lock:
+            self.accumulate_transaction(client_id, message)
+
+    def process_batch(self, batch: list, client_id: ClientId):
+        with self._state_lock:
+            for entry in batch:
+                self.accumulate_transaction(client_id, entry)
 
     @staticmethod
     def _chunk_payload(payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:

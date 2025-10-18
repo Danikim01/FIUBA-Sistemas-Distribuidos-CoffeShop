@@ -19,16 +19,16 @@ class FilterWorker(BaseWorker):
         """
         pass
     
-    def process_message(self, message: Any):
+    def process_message(self, message: Any, client_id: str):
         """Process a single message by applying filter.
         
         Args:
             message: Message to process
         """
         if self.apply_filter(message):
-            self.send_message(message)
-    
-    def process_batch(self, batch: List[Any]):
+            self.send_message(client_id=client_id, data=message)
+
+    def process_batch(self, batch: List[Any], client_id: str):
         """Process a batch by filtering and sending filtered results.
         
         Args:
@@ -36,4 +36,4 @@ class FilterWorker(BaseWorker):
         """
         filtered_items = [item for item in batch if self.apply_filter(item)]
         if filtered_items:
-            self.send_message(filtered_items)
+            self.send_message(client_id=client_id, data=filtered_items)
