@@ -120,6 +120,8 @@ class BaseWorker(ABC):
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
 
+            # Primero el EOF handler porque no es bloqueante
+            self.eof_handler.start_consuming(on_message)
             self.middleware_config.input_middleware.start_consuming(on_message)
 
         except KeyboardInterrupt:
