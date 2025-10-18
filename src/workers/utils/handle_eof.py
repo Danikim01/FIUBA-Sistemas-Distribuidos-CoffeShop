@@ -1,6 +1,7 @@
 import logging
 import os
-from typing import Any, Dict, cast
+import threading
+from typing import Any, Dict
 from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata
 from middleware_config import MiddlewareConfig
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
@@ -10,13 +11,15 @@ logger = logging.getLogger(__name__)
 Counter = Dict[str, int]  # [worker_id, count]
 
 class EOFHandler:
+    # Callback fn type: (message: Dict[str, Any]) -> None
     def __init__(self, middleware_config: MiddlewareConfig):
         self.worker_id: str = str(os.getenv('WORKER_ID', '0'))
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
         # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '100')) * self.replica_count
         
         self.middleware_config = middleware_config
-        self._queue_requeue_middleware: RabbitMQMiddlewareQueue = self.get_input_queue()
+        self.eof_requeue: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
+        self.consuming_thread = None
 
     def handle_eof(
         self,
@@ -75,12 +78,6 @@ class EOFHandler:
         message = create_message_with_metadata(client_id, data=None, message_type='EOF')
         self.middleware_config.output_middleware.send(message)
 
-    def get_input_queue(self) -> RabbitMQMiddlewareQueue:
-        """Get the final input queue name, if applicable."""
-        if self.middleware_config.has_input_exchange() and self.middleware_config.input_queue:
-            return self.middleware_config.create_queue(self.middleware_config.input_queue)
-        return cast(RabbitMQMiddlewareQueue, self.middleware_config.input_middleware)
-
     def requeue_eof(self, client_id: ClientId, counter: Counter):
         """Requeue an EOF message back to the input middleware.
         
@@ -93,10 +90,24 @@ class EOFHandler:
             message_type='EOF',
             counter=dict(counter),
         )
-        self._queue_requeue_middleware.send(message)
+        self.eof_requeue.send(message)
+
+    def start_consuming(self, on_message):
+        """Start the consuming thread."""
+        if not self.consuming_thread:
+            logger.info("Starting EOF handler consuming thread")
+            def _start_consuming():
+                try:
+                    self.eof_requeue.start_consuming(on_message)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(f"Error consuming EOF messages: {exc}")
+            self.consuming_thread = threading.Thread(target=_start_consuming, daemon=True)
+            self.consuming_thread.start()
 
     def cleanup(self) -> None:
         try:
-            self._queue_requeue_middleware.close()
+            self.eof_requeue.close()
+            if self.consuming_thread and self.consuming_thread.is_alive():
+                self.consuming_thread.join(timeout=10.0)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Error closing requeue middleware: %s", exc)
