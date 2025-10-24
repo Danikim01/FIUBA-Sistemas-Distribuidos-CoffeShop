@@ -90,12 +90,20 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
+    "top_clients_sharding_router": {
+        "display_name": "Top Clients Sharding Router",
+        "base_service_name": "top-clients-sharding-router",
+        "command": ["python", "sharding/sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
     "top_clients": {
         "display_name": "Top Clients Workers",
         "base_service_name": "top-clients-worker",
-        "command": ["python", "local_top_scaling/users.py"],
+        "command": ["python", "local_top_scaling/users_sharded.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
         "scalable": True,
     },
     "top_clients_birthdays": {
@@ -404,7 +412,12 @@ def generate_worker_sections(
                 environment["PREFETCH_COUNT"] = global_prefetch
             environment.setdefault("REPLICA_COUNT", str(total_count))
             if meta["needs_worker_id"]:
-                environment["WORKER_ID"] = str(index)
+                # For sharded workers, use 0-based indexing (0, 1, 2, ...)
+                # For regular workers, use 1-based indexing (1, 2, 3, ...)
+                if "sharded" in key or "top_clients" in key:
+                    environment["WORKER_ID"] = str(index - 1)  # 0-based for sharded workers
+                else:
+                    environment["WORKER_ID"] = str(index)  # 1-based for regular workers
 
             if environment:
                 lines.append("    environment:")

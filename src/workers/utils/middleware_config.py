@@ -33,6 +33,17 @@ class MiddlewareConfig:
     def _create_input_middleware(self) -> Union[RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue]:
         if self.has_input_exchange():
             queue_override = self.input_queue if self.input_queue else None
+            
+            # Check if this is a sharded worker that needs specific routing keys
+            if self._is_sharded_worker():
+                worker_id = int(os.getenv('WORKER_ID', '0'))
+                route_keys = [f"shard_{worker_id}"]
+                return self.create_exchange(
+                    self.input_exchange,
+                    queue_name=queue_override,
+                    route_keys=route_keys
+                )
+            
             return self.create_exchange(
                 self.input_exchange,
                 queue_name=queue_override,
@@ -47,12 +58,13 @@ class MiddlewareConfig:
     def create_exchange(
         self,
         name: str,
-        queue_name: Optional[str] = None
+        queue_name: Optional[str] = None,
+        route_keys: Optional[list[str]] = None
     ) -> RabbitMQMiddlewareExchange:
         return RabbitMQMiddlewareExchange(
             host=self.rabbitmq_host,
             exchange_name=name,
-            route_keys=[name],
+            route_keys=route_keys or [name],
             exchange_type='direct',
             port=self.rabbitmq_port,
             queue_name=queue_name,
@@ -87,6 +99,10 @@ class MiddlewareConfig:
     def has_output_exchange(self) -> bool:
         return self.output_exchange != ''
     
+    def _is_sharded_worker(self) -> bool:
+        """Check if this is a sharded worker that needs specific routing keys."""
+        return os.getenv('NUM_SHARDS') is not None and os.getenv('WORKER_ID') is not None
+
     def cleanup(self) -> None:
         """Clean up middleware connections."""
         if self.input_middleware:
