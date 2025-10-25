@@ -84,8 +84,16 @@ class ShardedClientsWorker(AggregatorWorker):
         counts_for_client = self.clients_data.pop(client_id, {})
         results: list[Dict[str, Any]] = []
 
+        # For each store, get the top 3 users by purchase quantity
         for store_id, user_counts in counts_for_client.items():
-            for user_id, purchases_qty in user_counts.items():
+            # Sort users by purchase quantity (descending) and take top 3
+            sorted_users = sorted(
+                user_counts.items(), 
+                key=lambda x: x[1],  # Sort by purchase quantity
+                reverse=True
+            )[:3]  # Take only top 3
+            
+            for user_id, purchases_qty in sorted_users:
                 results.append(
                     {
                         'store_id': store_id,
@@ -94,6 +102,7 @@ class ShardedClientsWorker(AggregatorWorker):
                     }
                 )
 
+        logger.info(f"ShardedClientsWorker {self.worker_id}: Sending {len(results)} top 3 local results for client {client_id}")
         return results
 
 

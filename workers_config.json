@@ -89,6 +89,23 @@
         "OUTPUT_QUEUE": "top_items_partial"
       }
     },
+    "items_sharding_router": {
+      "count": 1,
+      "environment": {
+        "INPUT_QUEUE": "transaction_items_year_filtered",
+        "OUTPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
+        "NUM_SHARDS": "2"
+      }
+    },
+    "items_sharded": {
+      "count": 2,
+      "environment": {
+        "INPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
+        "INPUT_QUEUE": "transaction_items_year_filtered_shard",
+        "OUTPUT_QUEUE": "top_items_partial",
+        "NUM_SHARDS": "2"
+      }
+    },
     "top_clients_sharding_router": {
       "count": 1,
       "environment": {

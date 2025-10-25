@@ -98,6 +98,22 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
+    "items_sharding_router": {
+        "display_name": "Items Sharding Router",
+        "base_service_name": "items-sharding-router",
+        "command": ["python", "sharding/items_sharding_router.py"],
+        "needs_worker_id": False,
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "scalable": False,
+    },
+    "items_sharded": {
+        "display_name": "Items Sharded Workers",
+        "base_service_name": "items-worker-sharded",
+        "command": ["python", "local_top_scaling/items_sharded.py"],
+        "needs_worker_id": True,
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "scalable": True,
+    },
     "items_aggregator": {
         "display_name": "Top Items Aggregator",
         "base_service_name": "items-aggregator",
@@ -398,6 +414,7 @@ def generate_worker_sections(
     workers: Dict[str, WorkerConfig],
     common_env: Dict[str, str],
     global_prefetch: Optional[str],
+    is_reduced_dataset: bool = False,
 ) -> List[str]:
     sections: List[str] = []
 
@@ -411,6 +428,13 @@ def generate_worker_sections(
         # Skip old workers if sharded versions exist
         if key == "tpv" and "tpv_sharded" in workers:
             continue
+        if key == "items_top" and "items_sharded" in workers and not is_reduced_dataset:
+            continue
+        
+        # Skip items sharding for reduced dataset (only January data)
+        if is_reduced_dataset and key in ["items_sharding_router", "items_sharded"]:
+            continue
+            
         # Note: top_clients is already the sharded version, so we don't skip it
         total_count = worker_cfg.count
         plural = "instancias" if total_count != 1 else "instancia"
@@ -485,8 +509,13 @@ def generate_compose(config: Dict[str, Any]) -> str:
     common_env_raw = config.get("common_environment", {})
     common_env, global_prefetch = parse_common_environment(common_env_raw)
 
+    # Check if this is a reduced dataset (only January data)
+    service_env = config.get("service_environment", {})
+    client_config = service_env.get("client", {})
+    is_reduced_dataset = client_config.get("REDUCED", False)
+
     worker_settings = load_worker_settings(raw_workers)
-    worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch)
+    worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch, is_reduced_dataset)
 
     base_services = render_base_services(config.get("service_environment"), common_env)
 
