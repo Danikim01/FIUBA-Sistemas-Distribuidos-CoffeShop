@@ -6,10 +6,12 @@ import threading
 import uuid
 from pathlib import Path
 
-import pytest
+import pytest # type: ignore
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 UTILS_PATH = PROJECT_ROOT / "src" / "workers" / "utils"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 if str(UTILS_PATH) not in sys.path:
     sys.path.insert(0, str(UTILS_PATH))
 
@@ -80,6 +82,10 @@ def eof_test_env(monkeypatch, rabbitmq_endpoint):
     _cleanup_queue(host, port, input_queue)
     _cleanup_queue(host, port, output_queue)
 
+    requeue_queue = f"{input_queue}_eof_requeue"
+
+    _cleanup_queue(host, port, requeue_queue)
+
     monkeypatch.setenv("RABBITMQ_HOST", host)
     monkeypatch.setenv("RABBITMQ_PORT", str(port))
     monkeypatch.setenv("INPUT_QUEUE", input_queue)
@@ -90,14 +96,15 @@ def eof_test_env(monkeypatch, rabbitmq_endpoint):
     monkeypatch.setenv("REPLICA_COUNT", "2")
 
     try:
-        yield input_queue, output_queue, port, host
+        yield output_queue, requeue_queue, port, host
     finally:
         _cleanup_queue(host, port, input_queue)
         _cleanup_queue(host, port, output_queue)
+        _cleanup_queue(host, port, requeue_queue)
 
 
 def test_eof_protocol_supports_multiple_clients(monkeypatch, eof_test_env):
-    input_queue, output_queue, port, host = eof_test_env
+    output_queue, requeue_queue, port, host = eof_test_env
 
     monkeypatch.setenv("WORKER_ID", "0")
     leader_config = MiddlewareConfig()
@@ -106,12 +113,12 @@ def test_eof_protocol_supports_multiple_clients(monkeypatch, eof_test_env):
     clients = ["client_A", "client_B"]
     for client in clients:
         message = create_message_with_metadata(client, data=None, message_type="EOF")
-        leader_handler.handle_eof(message)
+        leader_handler.handle_eof(message, client)
 
     leader_handler.cleanup()
     leader_config.cleanup()
 
-    requeued_messages = _consume_messages(host, port, input_queue, expected_count=len(clients))
+    requeued_messages = _consume_messages(host, port, requeue_queue, expected_count=len(clients))
     assert len(requeued_messages) == len(clients)
     for message in requeued_messages:
         assert message["type"] == "EOF"
@@ -123,7 +130,7 @@ def test_eof_protocol_supports_multiple_clients(monkeypatch, eof_test_env):
     replica_handler = EOFHandler(replica_config)
 
     for message in requeued_messages:
-        replica_handler.handle_eof(message)
+        replica_handler.handle_eof(message, message["client_id"])
 
     replica_handler.cleanup()
     replica_config.cleanup()
