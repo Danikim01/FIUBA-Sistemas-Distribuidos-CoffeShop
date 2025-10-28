@@ -32,6 +32,7 @@ class BaseWorker(ABC):
 
         self.middleware_config = MiddlewareConfig()
         self.eof_handler = EOFHandler(self.middleware_config)
+        self._current_message_metadata: Dict[str, Any] | None = None
 
         logger.info(
             "%s initialized - Input: %s, Output: %s",
@@ -111,6 +112,8 @@ class BaseWorker(ABC):
                     if self.shutdown_requested:
                         return logger.info("Shutdown requested, stopping message processing")
 
+                    self._current_message_metadata = message
+
                     client_id, actual_data = extract_data_and_client_id(message)
                     
                     if is_eof_message(message):
@@ -125,6 +128,8 @@ class BaseWorker(ABC):
 
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
+                finally:
+                    self._current_message_metadata = None
 
             self.eof_handler.start_consuming(on_message)
             self.middleware_config.input_middleware.start_consuming(on_message)
@@ -144,3 +149,7 @@ class BaseWorker(ABC):
             logger.info("Resources cleaned up")
         except Exception as e:
             logger.warning(f"Error cleaning up resources: {e}")
+
+    def _get_current_message_metadata(self) -> Dict[str, Any] | None:
+        """Return the metadata of the message currently being processed."""
+        return self._current_message_metadata

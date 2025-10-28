@@ -1,6 +1,7 @@
 """Message handling utilities for worker communication."""
 
 import logging
+import uuid
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,7 @@ def create_message_with_metadata(
     client_id: str,
     data: Any,
     message_type: Optional[str] = None,
+    message_uuid: Optional[str] = None,
     **additional_metadata
 ) -> Dict[str, Any]:
     """Create a message with client metadata.
@@ -52,9 +54,14 @@ def create_message_with_metadata(
     Returns:
         dict: Message with metadata wrapper
     """
+    metadata = dict(additional_metadata)
+    uuid_from_metadata = metadata.pop('message_uuid', None)
+    resolved_uuid = message_uuid or uuid_from_metadata or str(uuid.uuid4())
+
     message = {
         'client_id': client_id,
-        'data': data
+        'data': data,
+        'message_uuid': resolved_uuid,
     }
 
     if message_type is not None:
@@ -63,10 +70,10 @@ def create_message_with_metadata(
         message['type'] = data['type']
         logger.debug("Inheriting message type from data: %s", data['type'])
 
-    if additional_metadata:
-        logger.info(f"[MESSAGE UTILS] Additional metadata: {additional_metadata}")
+    if metadata:
+        logger.info(f"[MESSAGE UTILS] Additional metadata: {metadata}")
 
-    message.update(additional_metadata)
+    message.update(metadata)
     return message
 
 

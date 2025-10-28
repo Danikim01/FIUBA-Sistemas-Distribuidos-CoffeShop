@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections import defaultdict
 from typing import Any, Dict, List
 
@@ -112,7 +113,12 @@ class ShardingRouter(BaseWorker):
                 
             # Send batch
             logger.info(f"Flushing batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
-            self.send_message(client_id, batch, routing_key=routing_key)
+            self.send_message(
+                client_id,
+                batch,
+                routing_key=routing_key,
+                message_uuid=str(uuid.uuid4()),
+            )
             
             # Clear batch
             self.batches[client_id][routing_key] = []
@@ -138,7 +144,12 @@ class ShardingRouter(BaseWorker):
                     last_update = self.batch_timers[client_id].get(routing_key, 0)
                     if current_time - last_update >= self.batch_timeout:
                         logger.info(f"Timeout flush for client {client_id}, shard {routing_key}, size: {len(batch)}")
-                        self.send_message(client_id, batch, routing_key=routing_key)
+                        self.send_message(
+                            client_id,
+                            batch,
+                            routing_key=routing_key,
+                            message_uuid=str(uuid.uuid4()),
+                        )
                         routing_keys_to_remove.append(routing_key)
                 
                 # Clean up flushed batches
@@ -221,4 +232,3 @@ class ShardingRouter(BaseWorker):
 
 if __name__ == '__main__':
     run_main(ShardingRouter)
-
