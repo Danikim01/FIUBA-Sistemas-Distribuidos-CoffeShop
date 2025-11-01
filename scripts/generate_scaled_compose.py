@@ -71,7 +71,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "tpv-sharding-router",
         "command": ["python", "sharding/tpv_sharding_router.py"],
         "needs_worker_id": False,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE"],
         "scalable": False,
     },
     "tpv_sharded": {
@@ -79,7 +79,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "tpv-worker-sharded",
         "command": ["python", "local_top_scaling/tpv_sharded.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "tpv_aggregator": {
@@ -103,7 +103,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "items-sharding-router",
         "command": ["python", "sharding/items_sharding_router.py"],
         "needs_worker_id": False,
-        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_QUEUE", "OUTPUT_EXCHANGE"],
         "scalable": False,
     },
     "items_sharded": {
@@ -111,7 +111,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "items-worker-sharded",
         "command": ["python", "local_top_scaling/items_sharded.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "items_aggregator": {
@@ -127,7 +127,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "top-clients-sharding-router",
         "command": ["python", "sharding/sharding_router.py"],
         "needs_worker_id": False,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_EXCHANGE"],
         "scalable": False,
     },
     "top_clients": {
@@ -135,7 +135,7 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "base_service_name": "top-clients-worker-sharded",
         "command": ["python", "local_top_scaling/users_sharded.py"],
         "needs_worker_id": True,
-        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE", "NUM_SHARDS"],
+        "required_environment": ["INPUT_EXCHANGE", "INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": True,
     },
     "top_clients_birthdays": {
@@ -146,6 +146,20 @@ WORKER_DEFINITIONS: Dict[str, WorkerDefinition] = {
         "required_environment": ["INPUT_QUEUE", "OUTPUT_QUEUE"],
         "scalable": False,
     },
+}
+
+
+SHARDED_WORKER_KEYS = {
+    "tpv_sharded",
+    "items_sharded",
+    "top_clients",
+}
+
+
+ROUTER_TO_SHARDED: Dict[str, str] = {
+    "tpv_sharding_router": "tpv_sharded",
+    "items_sharding_router": "items_sharded",
+    "top_clients_sharding_router": "top_clients",
 }
 
 
@@ -370,11 +384,13 @@ def load_worker_settings(raw_workers: Mapping[str, Any]) -> Dict[str, WorkerConf
             raise SystemExit(f"Worker '{name}' configuration must be an object")
 
         count_value = worker_cfg.get("count")
-        if count_value is None:
-            default_count = 1 if not meta["scalable"] else 1
-            count = default_count
+        if meta["scalable"]:
+            if count_value is None:
+                count = 1
+            else:
+                count = ensure_int(count_value, f"Worker '{name}' count", allow_zero=False)
         else:
-            count = ensure_int(count_value, f"Worker '{name}' count", allow_zero=False)
+            count = 1
 
         env_cfg = ensure_mapping(worker_cfg.get("environment"), f"Worker '{name}' environment")
         environment = {key: str(value) for key, value in (env_cfg or {}).items()}
@@ -418,6 +434,12 @@ def generate_worker_sections(
 ) -> List[str]:
     sections: List[str] = []
 
+    sharded_counts = {
+        key: workers[key].count
+        for key in SHARDED_WORKER_KEYS
+        if key in workers
+    }
+
     for key in WORKER_DEFINITIONS:
         worker_cfg = workers.get(key)
         if worker_cfg is None or worker_cfg.count <= 0:
@@ -459,13 +481,19 @@ def generate_worker_sections(
             if global_prefetch is not None and "PREFETCH_COUNT" not in environment:
                 environment["PREFETCH_COUNT"] = global_prefetch
             environment.setdefault("REPLICA_COUNT", str(total_count))
-            
+
             # Special handling for sharding router
             if "sharding_router" in key:
                 environment.setdefault("BATCH_SIZE", "100")
                 environment.setdefault("BATCH_TIMEOUT", "1.0")
                 environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
-            
+                sharded_key = ROUTER_TO_SHARDED.get(key)
+                if sharded_key is None or sharded_key not in sharded_counts:
+                    raise SystemExit(
+                        f"Unable to set NUM_SHARDS for '{key}': missing sharded worker configuration"
+                    )
+                environment["NUM_SHARDS"] = str(sharded_counts[sharded_key])
+
             # Special handling for sharded workers - fix queue names and add sharded flag
             if "sharded" in meta["base_service_name"]:
                 # Add IS_SHARDED_WORKER flag for sharded workers
@@ -475,7 +503,10 @@ def generate_worker_sections(
                     base_queue = environment["INPUT_QUEUE"]
                     if not base_queue.endswith("_0") and not base_queue.endswith("_1"):
                         environment["INPUT_QUEUE"] = f"{base_queue}_{index - 1}"
-            
+
+            if key in SHARDED_WORKER_KEYS:
+                environment["NUM_SHARDS"] = str(total_count)
+
             if meta["needs_worker_id"]:
                 # For sharded workers, use 0-based indexing (0, 1, 2, ...)
                 # For regular workers, use 1-based indexing (1, 2, 3, ...)
