@@ -532,6 +532,91 @@ def generate_worker_sections(
     return sections
 
 
+def generate_healthchecker_section(
+    workers: Dict[str, WorkerConfig],
+    is_reduced_dataset: bool = False,
+    healthcheck_config: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Generate the healthchecker service section.
+    
+    Args:
+        workers: Dictionary of worker configurations
+        is_reduced_dataset: Whether this is a reduced dataset configuration
+        healthcheck_config: Optional healthchecker configuration from config file
+        
+    Returns:
+        String with the healthchecker service section
+    """
+    # Default healthchecker configuration
+    default_config = {
+        "port": "9290",
+        "interval_ms": "1000",
+        "timeout_ms": "1500",
+        "max_errors": "3",
+        "initial_delay_seconds": "15",
+    }
+    
+    # Override with config file values if provided
+    if healthcheck_config:
+        default_config.update({k: str(v) for k, v in healthcheck_config.items()})
+    
+    # Build list of container names to monitor
+    nodes_to_check = ["coffee-gateway"]  # Gateway is always included
+    
+    # Add all worker containers
+    for key in WORKER_DEFINITIONS:
+        worker_cfg = workers.get(key)
+        if worker_cfg is None or worker_cfg.count <= 0:
+            continue
+        
+        meta = WORKER_DEFINITIONS[key]
+        
+        # Skip old workers if sharded versions exist
+        if key == "tpv" and "tpv_sharded" in workers:
+            continue
+        if key == "items_top" and "items_sharded" in workers and not is_reduced_dataset:
+            continue
+        
+        # Skip items sharding for reduced dataset
+        if is_reduced_dataset and key in ["items_sharding_router", "items_sharded"]:
+            continue
+        
+        total_count = worker_cfg.count
+        
+        for index in range(1, total_count + 1):
+            service_name = build_service_name(meta["base_service_name"], index, total_count)
+            nodes_to_check.append(service_name)
+    
+    nodes_to_check_str = " ".join(nodes_to_check)
+    
+    lines = [
+        "  # Healthchecker (1 instancia)",
+        "  healthchecker-1:",
+        "    build:",
+        "      context: .",
+        "      dockerfile: ./src/healthcheck/Dockerfile",
+        "    container_name: healthchecker-1",
+        "    networks:",
+        "      - middleware-network",
+        "    depends_on:",
+        "      rabbitmq:",
+        "        condition: service_healthy",
+        "    environment:",
+        f"      - HEALTHCHECK_PORT={default_config['port']}",
+        f"      - HEALTHCHECK_INTERVAL_MS={default_config['interval_ms']}",
+        f"      - HEALTHCHECK_TIMEOUT_MS={default_config['timeout_ms']}",
+        f"      - HEALTHCHECK_MAX_ERRORS={default_config['max_errors']}",
+        f"      - HEALTHCHECK_INITIAL_DELAY_SECONDS={default_config['initial_delay_seconds']}",
+        f"      - NODES_TO_CHECK={nodes_to_check_str}",
+        "    volumes:",
+        "      - /var/run/docker.sock:/var/run/docker.sock",
+        "    restart: unless-stopped",
+        "",
+    ]
+    
+    return "\n".join(lines)
+
+
 def generate_compose(config: Dict[str, Any]) -> str:
     raw_workers = config.get("workers")
     if not isinstance(raw_workers, Mapping):
@@ -550,11 +635,23 @@ def generate_compose(config: Dict[str, Any]) -> str:
 
     base_services = render_base_services(config.get("service_environment"), common_env)
 
+    # Get healthchecker configuration from config file
+    healthcheck_config = config.get("healthchecker")
+
     compose_parts = [base_services.rstrip()]
     if worker_sections:
         compose_parts.append("")
         compose_parts.append("\n".join(worker_sections).rstrip())
         compose_parts.append("")
+    
+    # Add healthchecker section
+    healthchecker_section = generate_healthchecker_section(
+        worker_settings,
+        is_reduced_dataset,
+        healthcheck_config
+    )
+    compose_parts.append(healthchecker_section.rstrip())
+    
     compose_parts.append(FOOTER.rstrip())
     compose_parts.append("")
     return "\n".join(compose_parts)

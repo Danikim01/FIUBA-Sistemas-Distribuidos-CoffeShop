@@ -138,9 +138,18 @@ class BaseWorker(ABC):
                     if is_eof_message(message):
                         return self.handle_eof(message, client_id)
 
+                    # Validate actual_data before processing
+                    if not isinstance(actual_data, (dict, list)):
+                        logger.error(
+                            f"Invalid message data type for client {client_id}: "
+                            f"expected dict or list, got {type(actual_data).__name__} "
+                            f"with value: {actual_data}"
+                        )
+                        return
+
                     self._increment_inflight()
                     try:
-                        logger.debug(f"Processing message for client {client_id}")
+                        logger.debug(f"Processing message for client {client_id}, data type: {type(actual_data).__name__}")
                         if isinstance(actual_data, list):
                             self.process_batch(actual_data, client_id)
                         else:
@@ -149,7 +158,10 @@ class BaseWorker(ABC):
                         self._decrement_inflight()
 
                 except Exception as e:
-                    logger.error(f"Error processing message: {e}")
+                    logger.error(
+                        f"Error processing message for client {client_id}: {e}",
+                        exc_info=True
+                    )
                 finally:
                     self._current_message_metadata = None
 

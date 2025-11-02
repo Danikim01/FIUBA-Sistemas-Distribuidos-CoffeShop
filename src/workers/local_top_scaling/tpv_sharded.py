@@ -61,11 +61,20 @@ class ShardedTPVWorker(AggregatorWorker):
             worker_id=str(self.worker_id)
         )
         
-        # Get reference to the state data managed by StateManager
-        self.partial_tpv = self.state_manager.get_state_data() or {}
-        
-        # Sync state after potential load from disk
+        # Sync state after potential load from disk (must be done before getting reference)
         self.state_manager.sync_state_after_load()
+        
+        # Get reference to the state data managed by StateManager
+        # Always use state_data directly from the manager to ensure defaultdict structure
+        from collections import defaultdict
+        state_data = self.state_manager.state_data
+        if state_data is None or not isinstance(state_data, defaultdict):
+            # Create a new defaultdict if state_data is None or not a defaultdict
+            state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+            self.state_manager.state_data = state_data
+        
+        # Ensure partial_tpv always points to the state_manager's state_data
+        self.partial_tpv = self.state_manager.state_data
 
     def reset_state(self, client_id: ClientId) -> None:
         try:
@@ -119,6 +128,15 @@ class ShardedTPVWorker(AggregatorWorker):
         amount: float = safe_float_conversion(payload.get('final_amount'), 0.0)
 
         logger.info(f"Processing TPV transaction for store_id={store_id}, year_half={year_half}, amount={amount}")
+        
+        # Ensure we're using the state_manager's state_data (it might have been updated)
+        # and ensure it's a defaultdict before accessing
+        from collections import defaultdict
+        if not isinstance(self.state_manager.state_data, defaultdict):
+            self.state_manager.state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
+        self.partial_tpv = self.state_manager.state_data
+        
+        # Now safely accumulate the transaction
         self.partial_tpv[client_id][year_half][store_id] += amount
 
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
