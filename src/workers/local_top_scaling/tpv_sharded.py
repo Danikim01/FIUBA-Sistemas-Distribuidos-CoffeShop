@@ -64,13 +64,13 @@ class ShardedTPVWorker(AggregatorWorker):
         # Get reference to the state data managed by StateManager
         # Always use state_data directly from the manager to ensure defaultdict structure
         from collections import defaultdict
-        state_data = self.state_manager.get_state_data()
+        state_data = self.state_manager.state_data
         if state_data is None or not isinstance(state_data, defaultdict):
             # Create a new defaultdict if state_data is None or not a defaultdict
             state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
-            self.state_manager.update_state_data(state_data)
+            self.state_manager.state_data = state_data
         
-        # Ensure partial_tpv always points to the same object as state_manager.state_data
+        # Ensure partial_tpv always points to the state_manager's state_data
         self.partial_tpv = self.state_manager.state_data
 
     def reset_state(self, client_id: ClientId) -> None:

@@ -38,6 +38,8 @@ class ShardedClientsWorker(AggregatorWorker):
         
         logger.info(f"ShardedClientsWorker initialized: worker_id={self.worker_id}, num_shards={self.num_shards}, routing_key={self.expected_routing_key}")
 
+        self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), minimum=1, default=3)
+
         self.clients_data: DefaultDict[
             ClientId, DefaultDict[int, DefaultDict[int, int]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
@@ -84,14 +86,14 @@ class ShardedClientsWorker(AggregatorWorker):
         counts_for_client = self.clients_data.pop(client_id, {})
         results: list[Dict[str, Any]] = []
 
-        # For each store, get the top 3 users by purchase quantity
+        # For each store, get the top N users by purchase quantity
         for store_id, user_counts in counts_for_client.items():
-            # Sort users by purchase quantity (descending) and take top 3
+            # Sort users by purchase quantity (descending) and take top N
             sorted_users = sorted(
                 user_counts.items(), 
                 key=lambda x: x[1],  # Sort by purchase quantity
                 reverse=True
-            )[:3]  # Take only top 3
+            )[: self.top_n]  # Take only top-N
             
             for user_id, purchases_qty in sorted_users:
                 results.append(
@@ -102,7 +104,13 @@ class ShardedClientsWorker(AggregatorWorker):
                     }
                 )
 
-        logger.info(f"ShardedClientsWorker {self.worker_id}: Sending {len(results)} top 3 local results for client {client_id}")
+        logger.info(
+            "ShardedClientsWorker %s: Sending %s top %s local results for client %s",
+            self.worker_id,
+            len(results),
+            self.top_n,
+            client_id,
+        )
         return results
 
 
