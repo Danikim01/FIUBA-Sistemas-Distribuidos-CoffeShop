@@ -484,7 +484,11 @@ def generate_worker_sections(
 
             # Special handling for sharding router
             if "sharding_router" in key:
-                environment.setdefault("BATCH_SIZE", "100")
+                # TPV sharding router uses BATCH_SIZE=5000, others use 100
+                if key == "tpv_sharding_router":
+                    environment.setdefault("BATCH_SIZE", "5000")
+                else:
+                    environment.setdefault("BATCH_SIZE", "100")
                 environment.setdefault("BATCH_TIMEOUT", "1.0")
                 environment["REPLICA_COUNT"] = "1"  # Sharding router is always single instance
                 sharded_key = ROUTER_TO_SHARDED.get(key)
@@ -524,6 +528,11 @@ def generate_worker_sections(
 
             lines.append(f"    command: {format_command(meta['command'])}")
             lines.append("    restart: unless-stopped")
+            
+            # Add volumes for TPV sharded workers (logs persistence)
+            if key == "tpv_sharded":
+                lines.append("    volumes:")
+                lines.append("      - ./logs:/app/logs")
 
             sections.append("\n".join(lines))
 
