@@ -113,6 +113,45 @@ class ShardedClientsWorker(AggregatorWorker):
         )
         return results
 
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        """
+        Handle EOF by sending data to aggregator and then sending EOF directly to output.
+        
+        Sharded workers do NOT use the consensus mechanism (requeue) between them.
+        Each sharded worker sends EOF directly to the Top Clients aggregator after sending its data.
+        The aggregator will wait for EOFs from all sharded workers (using REPLICA_COUNT).
+        """
+        if self.shutdown_requested:
+            logger.info("Shutdown requested, rejecting EOF to requeue")
+            raise InterruptedError("Shutdown requested before EOF handling")
+        
+        logger.info(f"[EOF] [SHARDED-CLIENTS-WORKER] Received EOF for client {client_id}")
+        
+        with self._pause_message_processing():
+            try:
+                # Send data to aggregator (this is done by AggregatorWorker.handle_eof)
+                # But we need to avoid calling BaseWorker.handle_eof which uses consensus mechanism
+                payload_batches: list[list[Dict[str, Any]]] = []
+                with self._state_lock:
+                    payload = self.create_payload(client_id)
+                    if payload:
+                        self.reset_state(client_id)
+                        if self.chunk_payload:
+                            payload_batches = [payload]
+                        else:
+                            payload_batches = self._chunk_payload(payload, self.chunk_size)
+
+                for chunk in payload_batches:
+                    self.send_payload(chunk, client_id)
+                
+                # Send EOF directly to output WITHOUT consensus mechanism
+                # This is the key change: sharded workers send EOF directly to aggregator
+                logger.info(f"[EOF] [SHARDED-CLIENTS-WORKER] Sending EOF directly to Top Clients aggregator for client {client_id} (no consensus)")
+                self.eof_handler.output_eof(client_id=client_id)
+                
+            except Exception:
+                raise
+
 
 if __name__ == '__main__':
     run_main(ShardedClientsWorker)

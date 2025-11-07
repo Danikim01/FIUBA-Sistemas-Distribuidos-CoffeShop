@@ -99,6 +99,7 @@ class StateManager(Generic[T]):
                 id_map, state_map = self._read_state_payload(path)
                 self._last_processed_message = dict(id_map)
                 self._restore_state_from_map(state_map)
+                logger.info("[LOAD-STATE] Loaded persisted state from %s with %d client UUIDs", path, len(id_map))
                 return
             except Exception as exc:
                 logger.warning("[LOAD-STATE] [FAILED] Failed to load state from %s: %s", path, exc)

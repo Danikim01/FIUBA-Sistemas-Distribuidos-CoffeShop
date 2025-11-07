@@ -130,8 +130,9 @@ class BaseWorker(ABC):
                     try:
                         logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
                         if isinstance(actual_data, list):
-                            logger.info(f"Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
+                            logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
                             self.process_batch(actual_data, client_id)
+                            logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
                         else:
                             logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
                             self.process_message(actual_data, client_id)

@@ -128,16 +128,36 @@ class ShardingRouter(BaseWorker):
     def _flush_all_batches(self) -> None:
         """
         Flush all batches that have exceeded the timeout.
+        
+        Note: This method will skip clients that are not in batch_timers,
+        which indicates they are being processed by handle_eof.
         """
         current_time = time.time()
         clients_to_remove = []
         
         with self.batch_lock:
             for client_id, shard_batches in self.batches.items():
+                # Skip clients that are not in batch_timers - they are being processed by handle_eof
+                # This prevents race conditions where the timer might send batches after handle_eof
+                # has cleaned up the batches but before it sends the EOF
+                if client_id not in self.batch_timers:
+                    logger.debug(f"Skipping client {client_id} in timer flush - being processed by handle_eof")
+                    continue
+                
                 routing_keys_to_remove = []
                 
                 for routing_key, batch in shard_batches.items():
                     if not batch:
+                        continue
+                    
+                    # Double-check that client is still in batch_timers (might have been removed by handle_eof)
+                    # This prevents race conditions where handle_eof removes the client while timer is processing
+                    if client_id not in self.batch_timers:
+                        logger.debug(f"Client {client_id} removed from batch_timers during timer flush - skipping")
+                        break
+                    
+                    # Check if routing_key has a timer entry
+                    if routing_key not in self.batch_timers[client_id]:
                         continue
                         
                     # Check if batch has timed out
@@ -178,42 +198,73 @@ class ShardingRouter(BaseWorker):
         """
         Handle EOF by flushing all remaining batches for the client.
         
+        This ensures all batches are sent BEFORE the EOF for each shard. The strategy is:
+        1. Acquire the batch_lock to prevent timer from processing this client
+        2. Mark the client as EOF-pending to prevent timer from flushing batches for this client
+        3. Flush ALL remaining batches for each shard (including any that might be in-flight from timer)
+        4. Send EOF to each shard only after all batches for that shard have been sent
+        
+        This synchronization ensures that each sharded worker receives all its batches
+        before receiving the EOF, preventing protocol violations where batches arrive
+        after EOF.
+        
         Args:
             message: EOF message
             client_id: Client identifier
         """
-        logger.info(f"Received EOF for client {client_id}, flushing all remaining batches")
+        logger.info(f"Received EOF for client {client_id}, flushing all remaining batches per shard")
         
         with self._pause_message_processing():
-            # First, flush all remaining batches for this client
+            # Acquire the lock to ensure timer cannot process this client while we're handling EOF
+            # This ensures that ALL batches are sent before EOF, not just the ones we see
             with self.batch_lock:
+                # Mark this client as EOF-pending by removing it from batch_timers
+                # This way _flush_all_batches won't process it even if it's already in the loop
+                if client_id in self.batch_timers:
+                    del self.batch_timers[client_id]
+                
+                # Collect ALL remaining batches to flush, grouped by shard
+                # We do this while holding the lock to ensure we get all batches
+                batches_by_shard = {}
                 if client_id in self.batches:
                     for routing_key in list(self.batches[client_id].keys()):
-                        self._flush_batch(client_id, routing_key)
-                    
-                    # Clean up client data
-                    if client_id in self.batches:
-                        del self.batches[client_id]
-                    if client_id in self.batch_timers:
-                        del self.batch_timers[client_id]
-
-            # Send EOF to each shard specifically with routing keys
-            logger.info(f"Propagating EOF to all {self.num_shards} shards for client {client_id}")
+                        batch = self.batches[client_id][routing_key]
+                        if batch:
+                            batches_by_shard[routing_key] = batch.copy()  # Make a copy to avoid issues
+                            logger.info(f"Found final batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
             
-            # Batch all EOF messages to reduce channel creation overhead
-            eof_messages = []
+            # Send all batches first (synchronously), grouped by shard
+            # We do this outside the lock to avoid holding it during I/O
+            for routing_key, batch in batches_by_shard.items():
+                logger.info(f"Flushing final batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
+                self.send_message(
+                    client_id,
+                    batch,
+                    routing_key=routing_key,
+                    message_uuid=str(uuid.uuid4()),
+                )
+            
+            # Clean up client data after all batches are sent
+            with self.batch_lock:
+                if client_id in self.batches:
+                    del self.batches[client_id]
+            
+            # Only after all batches are sent, send EOF to each shard
+            # Send EOF to all shards (even if they didn't receive batches) to ensure
+            # all sharded workers know the stream has ended
+            logger.info(f"All batches flushed for client {client_id}. Now propagating EOF to all {self.num_shards} shards")
+            
             for shard_id in range(self.num_shards):
                 routing_key = f"shard_{shard_id}"
-                eof_messages.append((client_id, routing_key))
-            
-            for client_id_eof, routing_key in eof_messages:
+                logger.info(f"Sending EOF to shard {routing_key} for client {client_id}")
                 self.eof_handler.handle_eof_with_routing_key(
-                    client_id=client_id_eof,
+                    client_id=client_id,
                     message=message,
                     routing_key=routing_key,
                     exchange=self.middleware_config.output_exchange,
                 )
-                break
+            
+            logger.info(f"EOF propagation completed for client {client_id} to all {self.num_shards} shards")
 
         
     

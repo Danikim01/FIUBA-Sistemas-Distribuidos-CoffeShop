@@ -101,6 +101,9 @@ class ShardedTPVWorker(AggregatorWorker):
             self.state_manager.state_data = state_data
         
         self.partial_tpv = self.state_manager.state_data
+        
+        # Track clients that have already received EOF to reject batches that arrive after EOF
+        self._clients_with_eof: set[ClientId] = set()
 
     def reset_state(self, client_id: ClientId) -> None:
         try:
@@ -148,13 +151,27 @@ class ShardedTPVWorker(AggregatorWorker):
         store_id = safe_int_conversion(payload.get('store_id'), minimum=0)
         amount: float = safe_float_conversion(payload.get('final_amount'), 0.0)
 
-        logger.info(f"Processing TPV transaction for store_id={store_id}, year_half={year_half}, amount={amount}")
+        # logger.info(f"Processing TPV transaction for store_id={store_id}, year_half={year_half}, amount={amount}")
         self.partial_tpv[client_id][year_half][store_id] += amount
 
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
         if self.shutdown_requested:
             logger.info("[BATCH-FLOW] Shutdown requested, rejecting batch to requeue")
             raise InterruptedError("Shutdown requested before batch processing")
+        
+        # Reject batches that arrive after EOF for this client
+        # NOTE: This indicates a protocol error - batches should never arrive after EOF.
+        # This is a safety check, but the root cause should be fixed in the sharding router.
+        if client_id in self._clients_with_eof:
+            message_uuid = self._get_current_message_uuid()
+            logger.error(
+                "[PROCESSING - BATCH] [PROTOCOL-ERROR] Batch %s for client %s arrived AFTER EOF (protocol violation). "
+                "This indicates the sharding router sent EOF before all batches were delivered. "
+                "Discarding batch to prevent incorrect processing.",
+                message_uuid,
+                client_id,
+            )
+            raise Exception(f"Batch arrived after EOF for client {client_id} (protocol error), discarding")
             
         message_uuid = self._get_current_message_uuid()
 
@@ -184,10 +201,14 @@ class ShardedTPVWorker(AggregatorWorker):
                     self.state_manager.set_last_processed_message(client_id, message_uuid)
 
                 if not self.shutdown_requested:
+                    logger.info(f"[BATCH-FLOW] [PERSIST] About to persist state for client {client_id}, message_uuid={message_uuid}")
                     self.state_manager.persist_state()
+                    logger.info(f"[BATCH-FLOW] [PERSIST] State persisted successfully for client {client_id}, message_uuid={message_uuid}")
                 else:
                     logger.info("[PROCESSING - BATCH] [INTERRUPT] Shutdown requested after batch processing, rolling back state")
                     raise InterruptedError("Shutdown requested, preventing state persistence")
+                
+                logger.info(f"[BATCH-FLOW] [SUCCESS] Batch processing completed successfully for client {client_id}, message_uuid={message_uuid}. Returning from process_batch.")
             except Exception as e:
                 logger.error(f"[BATCH-FLOW] [ERROR] Exception during batch processing: {type(e).__name__}: {e}")
                 logger.info("[BATCH-FLOW] [ROLLBACK] Restoring previous state and UUID")
@@ -218,13 +239,65 @@ class ShardedTPVWorker(AggregatorWorker):
         return results
 
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        """
+        Handle EOF by sending data to aggregator and then sending EOF directly to output.
+        
+        Sharded workers do NOT use the consensus mechanism (requeue) between them.
+        Each sharded worker sends EOF directly to the TPV aggregator after sending its data.
+        The aggregator will wait for EOFs from all sharded workers (using REPLICA_COUNT).
+        """
         if self.shutdown_requested:
             logger.info("Shutdown requested, rejecting EOF to requeue")
             raise InterruptedError("Shutdown requested before EOF handling")
+        
+        # Mark this client as having received EOF to reject any batches that arrive after
+        with self._state_lock:
+            self._clients_with_eof.add(client_id)
+            logger.info(f"[EOF] Marking client {client_id} as having received EOF. Future batches for this client will be rejected.")
+        
+        # Obtener la data que se va a enviar antes de que create_payload la elimine del estado
+        with self._state_lock:
+            # Crear una copia de los datos para logging sin modificar el estado
+            totals_for_logging = {}
+            for year_half, stores in self.partial_tpv.get(client_id, {}).items():
+                totals_for_logging[year_half] = dict(stores)
+            
+            # Log de la data que se va a enviar
+            if totals_for_logging:
+                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: Preparando data para enviar al TPV aggregator")
+                total_tpv = 0.0
+                store_count = 0
+                for year_half, stores in totals_for_logging.items():
+                    for store_id, tpv_value in stores.items():
+                        total_tpv += tpv_value
+                        store_count += 1
+                        logger.info(f"[EOF] [DATA-TO-SEND]   - year_half={year_half}, store_id={store_id}, tpv={tpv_value}")
+                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: Resumen - {store_count} stores, total_tpv={total_tpv}")
+            else:
+                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: No hay data para enviar (estado vacío)")
             
         with self._pause_message_processing():
             try:
-                super().handle_eof(message, client_id)
+                # Send data to aggregator (this is done by AggregatorWorker.handle_eof)
+                # But we need to avoid calling BaseWorker.handle_eof which uses consensus mechanism
+                payload_batches: list[list[Dict[str, Any]]] = []
+                with self._state_lock:
+                    payload = self.create_payload(client_id)
+                    if payload:
+                        self.reset_state(client_id)
+                        if self.chunk_payload:
+                            payload_batches = [payload]
+                        else:
+                            payload_batches = self._chunk_payload(payload, self.chunk_size)
+
+                for chunk in payload_batches:
+                    self.send_payload(chunk, client_id)
+                
+                # Send EOF directly to output WITHOUT consensus mechanism
+                # This is the key change: sharded workers send EOF directly to aggregator
+                logger.info(f"[EOF] [SHARDED-WORKER] Sending EOF directly to TPV aggregator for client {client_id} (no consensus)")
+                self.eof_handler.output_eof(client_id=client_id)
+                
             except Exception:
                 raise
 

@@ -162,6 +162,13 @@ ROUTER_TO_SHARDED: Dict[str, str] = {
     "top_clients_sharding_router": "top_clients",
 }
 
+# Map aggregators to their corresponding sharded workers
+# This is used to set REPLICA_COUNT for aggregators to match the number of sharded workers
+AGGREGATOR_TO_SHARDED: Dict[str, str] = {
+    "tpv_aggregator": "tpv_sharded",
+    "top_clients_birthdays": "top_clients",
+}
+
 
 FOOTER = """networks:\n  middleware-network:\n    driver: bridge\n\nvolumes:\n  rabbitmq_data:\n"""
 
@@ -497,6 +504,18 @@ def generate_worker_sections(
                         f"Unable to set NUM_SHARDS for '{key}': missing sharded worker configuration"
                     )
                 environment["NUM_SHARDS"] = str(sharded_counts[sharded_key])
+            
+            # Special handling for aggregators that receive from sharded workers
+            # They need REPLICA_COUNT equal to the number of sharded workers
+            if key in AGGREGATOR_TO_SHARDED:
+                sharded_key = AGGREGATOR_TO_SHARDED[key]
+                if sharded_key not in sharded_counts:
+                    raise SystemExit(
+                        f"Unable to set REPLICA_COUNT for '{key}': missing sharded worker configuration for '{sharded_key}'"
+                    )
+                # Set REPLICA_COUNT to match the number of sharded workers
+                # This ensures the aggregator waits for EOFs from all sharded workers
+                environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
 
             # Special handling for sharded workers - fix queue names and add sharded flag
             if "sharded" in meta["base_service_name"]:

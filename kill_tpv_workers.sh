@@ -8,9 +8,9 @@
 set -euo pipefail
 
 WORKERS=("tpv-worker-sharded-0" "tpv-worker-sharded-1")
-WAIT_INITIAL=1 # Tiempo corto para que empiecen a procesar batches
-WAIT_BETWEEN_KILLS=0.01  # Tiempo corto entre kills para aumentar probabilidad de matar durante procesamiento
-KILLS_PER_WORKER=30
+WAIT_INITIAL=40 
+WAIT_BETWEEN_KILLS=2  # Tiempo corto entre kills para aumentar probabilidad de matar durante procesamiento
+KILLS_PER_WORKER=8
 
 echo "Esperando ${WAIT_INITIAL} segundos antes de comenzar a matar workers..."
 sleep ${WAIT_INITIAL}
@@ -58,6 +58,19 @@ while [ $total_kills -lt $((KILLS_PER_WORKER * ${#WORKERS[@]})) ]; do
     worker_index=$(( (worker_index + 1) % ${#WORKERS[@]} ))
 done
 
+# Al final, verificar y revivir los workers si están muertos
+echo ""
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Verificando estado final de los workers..."
+for worker in "${WORKERS[@]}"; do
+    # Verificar si el contenedor está corriendo
+    if ! docker ps --format '{{.Names}}' | grep -q "^${worker}$"; then
+        echo "  ⚠️  Worker ${worker} está muerto, reviviendo..."
+        docker start ${worker} 2>/dev/null || echo "    ⚠️  No se pudo revivir ${worker} (puede que no exista)"
+    else
+        echo "  ✅ Worker ${worker} está corriendo"
+    fi
+done
 
+echo ""
 echo "Script terminado."
 

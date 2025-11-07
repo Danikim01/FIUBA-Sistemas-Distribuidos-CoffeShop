@@ -197,9 +197,13 @@ class RabbitMQMiddlewareQueue(_BaseRabbitMQMiddleware):
             user_callback(message)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje en '%s': %s", self.queue_name, exc)
+            logger.info(f"[RABBITMQ-MIDDLEWARE] [NACK] Sending NACK with requeue=True for queue '{self.queue_name}'")
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         else:
+            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-PREPARE] Callback completed successfully for queue '{self.queue_name}'. About to send ACK.")
+            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK] Sending ACK for queue '{self.queue_name}', delivery_tag={method.delivery_tag}")
             ch.basic_ack(delivery_tag=method.delivery_tag)
+            logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-SENT] ACK sent successfully for queue '{self.queue_name}'")
 
     # ------------------------------------------------------------------
     # MessageMiddleware implementation
@@ -430,10 +434,14 @@ class RabbitMQMiddlewareExchange(_BaseRabbitMQMiddleware):
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error procesando mensaje desde '%s': %s", self.exchange_name, exc)
             if shared_queue:
+                logger.info(f"[RABBITMQ-MIDDLEWARE] [NACK] Sending NACK with requeue=True for exchange '{self.exchange_name}'")
                 ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
         else:
             if shared_queue:
+                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-PREPARE] Callback completed successfully for exchange '{self.exchange_name}'. About to send ACK.")
+                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK] Sending ACK for exchange '{self.exchange_name}', delivery_tag={method.delivery_tag}")
                 ch.basic_ack(delivery_tag=method.delivery_tag)
+                logger.info(f"[RABBITMQ-MIDDLEWARE] [ACK-SENT] ACK sent successfully for exchange '{self.exchange_name}'")
 
     # ------------------------------------------------------------------
     # MessageMiddleware implementation
