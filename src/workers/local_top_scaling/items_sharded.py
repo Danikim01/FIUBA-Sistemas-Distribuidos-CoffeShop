@@ -10,7 +10,7 @@ from typing import Any, DefaultDict, Dict, List
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_month # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
-from workers.utils.sharding_utils import get_routing_key_for_semester, extract_semester_from_payload
+from workers.utils.sharding_utils import get_routing_key_for_item, extract_item_id_from_payload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def _new_monthly_profit_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, floa
 class ShardedItemsWorker(AggregatorWorker):
     """
     Sharded version of ItemsWorker that processes transaction items based on item_id sharding.
-    Each worker processes a specific shard of items.
+    Each worker processes a specific shard of items (item_id 1-8 distributed across shards).
     """
     
     def __init__(self) -> None:
@@ -61,8 +61,8 @@ class ShardedItemsWorker(AggregatorWorker):
 
     def should_process_transaction(self, payload: Dict[str, Any]) -> bool:
         """
-        Determine if this worker should process the transaction item based on semester sharding.
-        Also handles coordinated EOF messages that don't have created_at.
+        Determine if this worker should process the transaction item based on item_id sharding.
+        Also handles coordinated EOF messages that don't have item_id.
         
         Args:
             payload: Transaction item data
@@ -71,21 +71,17 @@ class ShardedItemsWorker(AggregatorWorker):
             True if this worker should process the transaction item
         """
         # Check if this is a control message (EOF, heartbeat, etc.)
-        # Control messages like EOF don't have created_at and should be processed by all workers
-        semester = extract_semester_from_payload(payload)
-        if semester is None:
-            # This is likely a control message (EOF, etc.) - process it
-            logger.debug(f"Received control message (no created_at): {payload}")
+        # Control messages like EOF don't have item_id and should not be processed
+        item_id = extract_item_id_from_payload(payload)
+        if item_id is None:
+            # This is likely a control message (EOF, etc.) - don't process it
+            logger.debug(f"Received control message (no item_id): {payload}")
             return False
         
         # For regular transaction items, verify they belong to our shard
-        created_at = payload.get('created_at')
-        if created_at is None:
-            logger.debug("created_at is None, skipping transaction.")
-            return False
-        expected_routing_key = get_routing_key_for_semester(created_at, self.num_shards)
+        expected_routing_key = get_routing_key_for_item(item_id, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
-            logger.warning(f"Received transaction item for wrong shard: semester={semester}, expected={self.expected_routing_key}, got={expected_routing_key}")
+            logger.warning(f"Received transaction item for wrong shard: item_id={item_id}, expected={self.expected_routing_key}, got={expected_routing_key}")
             return False
             
         return True
@@ -95,9 +91,9 @@ class ShardedItemsWorker(AggregatorWorker):
         if not self.should_process_transaction(payload):
             return
 
-        # Skip control messages (EOF, etc.) - they don't have created_at
-        semester = extract_semester_from_payload(payload)
-        if semester is None:
+        # Skip control messages (EOF, etc.) - they don't have item_id
+        item_id = extract_item_id_from_payload(payload)
+        if item_id is None:
             logger.debug(f"Skipping control message in accumulate_transaction: {payload}")
             return
             
@@ -105,13 +101,13 @@ class ShardedItemsWorker(AggregatorWorker):
         if not year_month:
             return
 
-        item_id = safe_int_conversion(payload.get('item_id'))
+        item_id_int = safe_int_conversion(item_id)
         quantity = safe_int_conversion(payload.get('quantity'), 0)
         subtotal = safe_float_conversion(payload.get('subtotal'), 0.0)
 
-        logger.info(f"Processing items transaction for item_id={item_id}, year_month={year_month}, quantity={quantity}, subtotal={subtotal}")
-        self._quantity_totals[client_id][year_month][item_id] += quantity
-        self._profit_totals[client_id][year_month][item_id] += subtotal
+        logger.info(f"Processing items transaction for item_id={item_id_int}, year_month={year_month}, quantity={quantity}, subtotal={subtotal}")
+        self._quantity_totals[client_id][year_month][item_id_int] += quantity
+        self._profit_totals[client_id][year_month][item_id_int] += subtotal
 
     def _build_results(
         self,
@@ -157,6 +153,45 @@ class ShardedItemsWorker(AggregatorWorker):
         }
 
         return [payload]
+
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        """
+        Handle EOF by sending data to aggregator and then sending EOF directly to output.
+        
+        Sharded workers do NOT use the consensus mechanism (requeue) between them.
+        Each sharded worker sends EOF directly to the Items aggregator after sending its data.
+        The aggregator will wait for EOFs from all sharded workers (using REPLICA_COUNT).
+        """
+        if self.shutdown_requested:
+            logger.info("Shutdown requested, rejecting EOF to requeue")
+            raise InterruptedError("Shutdown requested before EOF handling")
+        
+        logger.info(f"[EOF] [SHARDED-ITEMS-WORKER] Received EOF for client {client_id}")
+        
+        with self._pause_message_processing():
+            try:
+                # Send data to aggregator (this is done by AggregatorWorker.handle_eof)
+                # But we need to avoid calling BaseWorker.handle_eof which uses consensus mechanism
+                payload_batches: list[list[Dict[str, Any]]] = []
+                with self._state_lock:
+                    payload = self.create_payload(client_id)
+                    if payload:
+                        self.reset_state(client_id)
+                        if self.chunk_payload:
+                            payload_batches = [payload]
+                        else:
+                            payload_batches = self._chunk_payload(payload, self.chunk_size)
+
+                for chunk in payload_batches:
+                    self.send_payload(chunk, client_id)
+                
+                # Send EOF directly to output WITHOUT consensus mechanism
+                # This is the key change: sharded workers send EOF directly to aggregator
+                logger.info(f"[EOF] [SHARDED-ITEMS-WORKER] Sending EOF directly to Items aggregator for client {client_id} (no consensus)")
+                self.eof_handler.output_eof(client_id=client_id)
+                
+            except Exception:
+                raise
 
 
 if __name__ == '__main__':

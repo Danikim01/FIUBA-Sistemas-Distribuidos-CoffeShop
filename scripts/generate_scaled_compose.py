@@ -170,6 +170,7 @@ ROUTER_TO_SHARDED: Dict[str, str] = {
 # This is used to set REPLICA_COUNT for aggregators to match the number of sharded workers
 AGGREGATOR_TO_SHARDED: Dict[str, str] = {
     "tpv_aggregator": "tpv_sharded",
+    "items_aggregator": "items_sharded",
     "top_clients_birthdays": "top_clients",
 }
 
@@ -461,11 +462,8 @@ def generate_worker_sections(
         # Skip old workers if sharded versions exist
         if key == "tpv" and "tpv_sharded" in workers:
             continue
-        if key == "items_top" and "items_sharded" in workers and not is_reduced_dataset:
-            continue
-        
-        # Skip items sharding for reduced dataset (only January data)
-        if is_reduced_dataset and key in ["items_sharding_router", "items_sharded"]:
+        # Always skip items_top when items_sharded exists (always use sharding)
+        if key == "items_top" and "items_sharded" in workers:
             continue
             
         # Note: top_clients is already the sharded version, so we don't skip it
@@ -522,7 +520,8 @@ def generate_worker_sections(
                 environment["REPLICA_COUNT"] = str(sharded_counts[sharded_key])
 
             # Special handling for sharded workers - fix queue names and add sharded flag
-            if "sharded" in meta["base_service_name"]:
+            # Check both by base_service_name and by key to ensure all sharded workers are detected
+            if "sharded" in meta["base_service_name"] or key in SHARDED_WORKER_KEYS:
                 # Add IS_SHARDED_WORKER flag for sharded workers
                 environment["IS_SHARDED_WORKER"] = "True"
                 # Fix the INPUT_QUEUE to include the shard number
@@ -617,11 +616,8 @@ def generate_healthchecker_section(
         # Skip old workers if sharded versions exist
         if key == "tpv" and "tpv_sharded" in workers:
             continue
-        if key == "items_top" and "items_sharded" in workers and not is_reduced_dataset:
-            continue
-        
-        # Skip items sharding for reduced dataset
-        if is_reduced_dataset and key in ["items_sharding_router", "items_sharded"]:
+        # Always skip items_top when items_sharded exists (always use sharding)
+        if key == "items_top" and "items_sharded" in workers:
             continue
         
         total_count = worker_cfg.count

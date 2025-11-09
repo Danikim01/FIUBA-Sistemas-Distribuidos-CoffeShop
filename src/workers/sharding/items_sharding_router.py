@@ -7,7 +7,7 @@ import os
 from typing import Any
 from workers.utils.worker_utils import run_main
 from workers.sharding.sharding_router import ShardingRouter
-from workers.utils.sharding_utils import get_routing_key_for_semester, extract_semester_from_payload
+from workers.utils.sharding_utils import get_routing_key_for_item, extract_item_id_from_payload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,14 +33,14 @@ class ItemsShardingRouter(ShardingRouter):
             message: Transaction item data
             client_id: Client identifier
         """
-        # Extract semester from the transaction item
-        semester = extract_semester_from_payload(message)
-        if semester is None:
-            logger.warning(f"Transaction item without created_at, skipping. Message keys: {list(message.keys()) if isinstance(message, dict) else 'Not a dict'}")
+        # Extract item_id from the transaction item
+        item_id = extract_item_id_from_payload(message)
+        if item_id is None:
+            logger.warning(f"Transaction item without item_id, skipping. Message keys: {list(message.keys()) if isinstance(message, dict) else 'Not a dict'}")
             return
             
-        # Calculate routing key for this semester
-        routing_key = get_routing_key_for_semester(message.get('created_at'), self.num_shards)
+        # Calculate routing key for this item_id
+        routing_key = get_routing_key_for_item(item_id, self.num_shards)
         
         # Add message to batch
         self._add_to_batch(client_id, routing_key, message)

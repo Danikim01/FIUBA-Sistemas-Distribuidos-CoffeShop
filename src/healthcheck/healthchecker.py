@@ -137,7 +137,6 @@ class HealthChecker:
                 first_success = True
             
             # Send healthcheck message and wait for ACK
-            logger.info(f"Sending healthcheck message to {container_name}")
             err_count = self._send_healthcheck(conn, container_name)
             
             try:
@@ -228,10 +227,6 @@ class HealthChecker:
             # Send healthcheck message
             try:
                 bytes_sent = conn.send(HEALTHCHECK_MSG)
-                logger.debug(
-                    f"Sent healthcheck message ({HEALTHCHECK_MSG}) to {container_name} "
-                    f"({bytes_sent} bytes)"
-                )
             except Exception as e:
                 err_count += 1
                 logger.error(
@@ -245,15 +240,10 @@ class HealthChecker:
             try:
                 conn.settimeout(self.timeout)
                 buffer = conn.recv(MSG_BYTES)
-                logger.debug(
-                    f"Received response from {container_name}: {buffer} "
-                    f"(expected: {HEALTHCHECK_ACK})"
-                )
                 
                 if buffer == HEALTHCHECK_ACK:
                     # Success, reset error count
                     err_count = 0
-                    logger.info(f"Healthcheck successful for {container_name}")
                     break
                 else:
                     err_count += 1
@@ -265,16 +255,8 @@ class HealthChecker:
                     
             except socket.timeout:
                 err_count += 1
-                logger.debug(
-                    f"Timeout waiting for ACK from {container_name} "
-                    f"(error count: {err_count}/{self.max_errors})"
-                )
             except Exception as e:
                 err_count += 1
-                logger.debug(
-                    f"Error receiving ACK from {container_name}: {e} "
-                    f"(error count: {err_count}/{self.max_errors})"
-                )
             
             time.sleep(self.interval)
         

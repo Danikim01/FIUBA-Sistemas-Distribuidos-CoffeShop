@@ -4,6 +4,7 @@
 
 import logging
 import os
+import threading
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping
 
@@ -51,10 +52,20 @@ class FinalItemsAggregator(AggregatorWorker):
         self.menu_items_source = MenuItemsExtraSource(self.middleware_config)
         self.menu_items_source.start_consuming()
 
+        # Track how many EOFs we've received from sharded workers per client
+        # This is simpler than using the consensus mechanism since each sharded worker
+        # sends its own EOF directly (not the same EOF passing through all workers)
+        self.eof_count_per_client: Dict[ClientId, int] = {}
+        self.eof_count_lock = threading.Lock()
+        
+        # Number of sharded workers we expect EOFs from
+        self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
+
         logger.info(
-            "%s configured with top_per_month=%s",
+            "%s configured with top_per_month=%s, expected_eof_count=%s",
             self.__class__.__name__,
             self.top_per_month,
+            self.expected_eof_count,
         )
 
     def reset_state(self, client_id: ClientId) -> None:
@@ -158,6 +169,70 @@ class FinalItemsAggregator(AggregatorWorker):
                 "profit": "TOP_ITEMS_BY_PROFIT",
             }
         }
+
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+        """
+        Handle EOF from sharded workers.
+        
+        This aggregator waits for EOFs from ALL sharded workers before sending
+        the final results. The mechanism works as follows:
+        1. Each sharded worker sends EOF directly to this aggregator
+        2. This aggregator accumulates data from all sharded workers
+        3. We track how many EOFs we've received per client
+        4. Only when ALL EOFs are received (expected_eof_count), we send the
+           final aggregated results along with our own EOF
+        """
+        logger.info(f"[ITEMS-AGGREGATOR] Received EOF for client {client_id}")
+        
+        # Increment EOF counter for this client
+        with self.eof_count_lock:
+            self.eof_count_per_client[client_id] = self.eof_count_per_client.get(client_id, 0) + 1
+            eof_count = self.eof_count_per_client[client_id]
+        
+        logger.info(
+            f"[ITEMS-AGGREGATOR] EOF count for client {client_id}: {eof_count}/{self.expected_eof_count}"
+        )
+        
+        with self._pause_message_processing():
+            if eof_count >= self.expected_eof_count:
+                # We've received EOFs from all sharded workers
+                # Now send the final aggregated results along with our own EOF
+                logger.info(
+                    f"[ITEMS-AGGREGATOR] All EOFs received for client {client_id} "
+                    f"({eof_count}/{self.expected_eof_count}). "
+                    f"Sending final aggregated results and EOF."
+                )
+                
+                # Send final aggregated results
+                payload_batches: list[list[Dict[str, Any]]] = []
+                with self._state_lock:
+                    payload = self.create_payload(client_id)
+                    if payload:
+                        self.reset_state(client_id)
+                        if self.chunk_payload:
+                            payload_batches = [payload]
+                        else:
+                            payload_batches = self._chunk_payload(payload, self.chunk_size)
+
+                for chunk in payload_batches:
+                    self.send_payload(chunk, client_id)
+                
+                # Send our own EOF to the next worker (gateway)
+                logger.info(f"[ITEMS-AGGREGATOR] Sending EOF to gateway for client {client_id}")
+                self.eof_handler.output_eof(client_id=client_id)
+                
+                # Clean up EOF counter for this client
+                with self.eof_count_lock:
+                    if client_id in self.eof_count_per_client:
+                        del self.eof_count_per_client[client_id]
+            else:
+                # Not all EOFs received yet, just discard this EOF
+                # (we don't need requeue since each sharded worker sends its own EOF)
+                logger.info(
+                    f"[ITEMS-AGGREGATOR] Not all EOFs received yet for client {client_id} "
+                    f"({eof_count}/{self.expected_eof_count}). "
+                    f"Waiting for more EOFs..."
+                )
     
     def cleanup(self) -> None:
         try:

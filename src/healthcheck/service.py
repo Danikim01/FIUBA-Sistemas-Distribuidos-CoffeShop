@@ -78,13 +78,11 @@ class HealthcheckService:
                     break
                     
                 data, addr = self.socket.recvfrom(MSG_BYTES)
-                logger.info(f"Received healthcheck request from {addr}: {data} (expected: {HEALTHCHECK_REQUEST})")
                 
                 if data == HEALTHCHECK_REQUEST:
                     # Send ACK response
                     try:
                         bytes_sent = self.socket.sendto(HEALTHCHECK_ACK, addr)
-                        logger.info(f"Healthcheck ACK ({HEALTHCHECK_ACK}) sent to {addr} ({bytes_sent} bytes)")
                     except Exception as e:
                         logger.error(f"Error sending healthcheck ACK to {addr}: {e}", exc_info=True)
                 else:
