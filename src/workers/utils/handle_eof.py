@@ -18,8 +18,18 @@ class EOFHandler:
         self.replica_count: int = int(os.getenv('REPLICA_COUNT', '1'))
         # self.max_retries: int = int(os.getenv('MAX_EOF_RETRIES', '100')) * self.replica_count
         
+        # Check if this is a sharded worker - sharded workers don't use requeue mechanism
+        self.is_sharded_worker = os.getenv('IS_SHARDED_WORKER') == 'True'
+        
         self.middleware_config = middleware_config
-        self.eof_consumer: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
+        
+        # Only create and consume from EOF requeue queue if NOT a sharded worker
+        if self.is_sharded_worker:
+            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue setup")
+            self.eof_consumer = None
+        else:
+            self.eof_consumer: RabbitMQMiddlewareQueue = middleware_config.create_eof_requeue()
+        
         self.consuming_thread = None
 
         self._thread_local = threading.local()
@@ -163,6 +173,11 @@ class EOFHandler:
 
     def start_consuming(self, on_message):
         """Start the consuming thread."""
+        # Sharded workers don't consume from EOF requeue queue
+        if self.is_sharded_worker:
+            logger.info(f"Worker {self.worker_id} is a sharded worker - skipping EOF requeue queue consumption")
+            return
+        
         def _start_consuming():
             try:
                 logger.info(f"[DEBUG] Worker {self.worker_id} starting EOF consumer for queue: {self.eof_consumer.queue_name}")
@@ -178,7 +193,9 @@ class EOFHandler:
 
     def cleanup(self) -> None:
         try:
-            self.eof_consumer.close()
+            # Only close EOF consumer if it exists (not for sharded workers)
+            if self.eof_consumer is not None:
+                self.eof_consumer.close()
             with self._publishers_lock:
                 publishers = list(self._output_publishers) + list(self._requeue_publishers)
                 self._output_publishers.clear()
