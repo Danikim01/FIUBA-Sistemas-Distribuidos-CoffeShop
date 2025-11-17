@@ -6,7 +6,6 @@ import logging
 import os
 import threading
 from typing import Any, Dict
-from collections import defaultdict
 
 from workers.base_worker import BaseWorker
 from workers.utils.worker_utils import run_main
@@ -21,8 +20,8 @@ class FilterAggregator(BaseWorker):
     Aggregator worker that receives messages (data and EOFs) from filter workers
     and aggregates EOFs before propagating to output.
     
-    Accumulates all data messages and sends them when all EOFs are received.
-    When EOF count reaches REPLICA_COUNT, sends all accumulated messages and then EOF.
+    Forwards data messages immediately without accumulating them in memory.
+    When EOF count reaches REPLICA_COUNT, propagates EOF to output.
     """
     
     def __init__(self):
@@ -30,9 +29,7 @@ class FilterAggregator(BaseWorker):
         super().__init__()
         self.replica_count = int(os.getenv('REPLICA_COUNT', '3'))
         self.end_of_file_received = {}  # {client_id: count}
-        self.accumulated_messages = defaultdict(list)  # {client_id: [messages]}
         self.eof_lock = threading.Lock()
-        self.messages_lock = threading.Lock()
         
         logger.info(
             f"Filter Aggregator initialized - Input: {self.middleware_config.get_input_target()}, "
@@ -40,51 +37,49 @@ class FilterAggregator(BaseWorker):
             f"Replica count: {self.replica_count}"
         )
         logger.info(
-            f"\033[33m[FILTER-AGGREGATOR] DEBUG MODE: Accumulating messages until all EOFs received\033[0m"
+            f"\033[33m[FILTER-AGGREGATOR] Forwarding messages immediately, aggregating EOFs only\033[0m"
         )
     
     def process_message(self, message: Any, client_id: ClientId):
         """
-        Process regular data message - accumulate for later sending.
+        Process regular data message - forward immediately.
         
         Args:
-            message: Message data to accumulate
+            message: Message data to forward
             client_id: Client identifier
         """
-        # Accumulate message instead of forwarding immediately
-        with self.messages_lock:
-            self.accumulated_messages[client_id].append(message)
+        # Forward message immediately without accumulating
+        self.send_message(client_id=client_id, data=message)
         logger.debug(
-            f"[FILTER-AGGREGATOR] Accumulated message for client {client_id} "
-            f"(total: {len(self.accumulated_messages[client_id])})"
+            f"[FILTER-AGGREGATOR] Forwarded message immediately for client {client_id}"
         )
     
     def process_batch(self, batch: list, client_id: ClientId):
         """
-        Process batch of messages - accumulate for later sending.
+        Process batch of messages - forward immediately.
         
         Args:
-            batch: List of messages to accumulate
+            batch: List of messages to forward
             client_id: Client identifier
         """
-        # Accumulate batch instead of forwarding immediately
-        with self.messages_lock:
-            # If batch is a list of items, add each item
-            if isinstance(batch, list):
-                self.accumulated_messages[client_id].extend(batch)
-            else:
-                self.accumulated_messages[client_id].append(batch)
-        logger.debug(
-            f"[FILTER-AGGREGATOR] Accumulated batch of {len(batch) if isinstance(batch, list) else 1} "
-            f"messages for client {client_id} "
-            f"(total: {len(self.accumulated_messages[client_id])})"
-        )
+        # Forward batch immediately without accumulating
+        if isinstance(batch, list) and batch:
+            self.send_message(client_id=client_id, data=batch)
+            logger.debug(
+                f"[FILTER-AGGREGATOR] Forwarded batch of {len(batch)} messages immediately for client {client_id}"
+            )
+        elif batch:
+            # Single message in batch format
+            self.send_message(client_id=client_id, data=batch)
+            logger.debug(
+                f"[FILTER-AGGREGATOR] Forwarded single message immediately for client {client_id}"
+            )
     
     def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
         """
         Handle EOF message - count and propagate when all replicas have sent EOF.
         
-        When all EOFs are received, sends all accumulated messages and then EOF.
+        When all EOFs are received, propagates EOF to output.
         
         Args:
             message: EOF message
@@ -106,40 +101,14 @@ class FilterAggregator(BaseWorker):
             # Log when all EOFs are received (bright green)
             logger.info(
                 f"\033[92m[FILTER-AGGREGATOR] All EOFs received for client {client_id} "
-                f"({current_count}/{self.replica_count}), sending accumulated messages\033[0m"
+                f"({current_count}/{self.replica_count}), propagating EOF\033[0m"
             )
             
-            # Pause message processing to ensure no new messages arrive while sending
-            with self._pause_message_processing():
-                # Get accumulated messages for this client
-                with self.messages_lock:
-                    accumulated = self.accumulated_messages.pop(client_id, [])
-                    message_count = len(accumulated)
-                
-                # Send all accumulated messages
-                if accumulated:
-                    logger.info(
-                        f"\033[33m[FILTER-AGGREGATOR] Sending {message_count} accumulated messages "
-                        f"for client {client_id}\033[0m"
-                    )
-                    
-                    # Send messages in batches to avoid overwhelming the output
-                    batch_size = 5000
-                    for i in range(0, len(accumulated), batch_size):
-                        batch = accumulated[i:i + batch_size]
-                        self.send_message(client_id=client_id, data=batch)
-                    
-                    logger.info(
-                        f"\033[32m[FILTER-AGGREGATOR] All {message_count} messages sent for client {client_id}\033[0m"
-                    )
-                else:
-                    logger.warning(
-                        f"\033[33m[FILTER-AGGREGATOR] No accumulated messages for client {client_id}\033[0m"
-                    )
-                
-                # Now propagate EOF to output
-                #self._propagate_eof(client_id)
-                self.eof_handler.output_eof(client_id=client_id)
+            # Propagate EOF to output
+            self.eof_handler.output_eof(client_id=client_id)
+            logger.info(
+                f"\033[32m[FILTER-AGGREGATOR] EOF propagated for client {client_id}\033[0m"
+            )
                 
             # Reset counter for this client
             with self.eof_lock:
