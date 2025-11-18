@@ -138,7 +138,7 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         2. This aggregator accumulates data from all sharded workers
         3. We track how many EOFs we've received per client
         4. Only when ALL EOFs are received (expected_eof_count), we send the
-           final aggregated results along with our own EOF
+           final aggregated results
         """
         logger.info(f"[TOP-CLIENTS-AGGREGATOR] Received EOF for client {client_id}")
         
@@ -154,11 +154,11 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         with self._pause_message_processing():
             if eof_count >= self.expected_eof_count:
                 # We've received EOFs from all sharded workers
-                # Now send the final aggregated results along with our own EOF
+                # Now send the final aggregated results
                 logger.info(
                     f"[TOP-CLIENTS-AGGREGATOR] All EOFs received for client {client_id} "
                     f"({eof_count}/{self.expected_eof_count}). "
-                    f"Sending final aggregated results and EOF."
+                    f"Sending final aggregated results."
                 )
                 
                 # Send final aggregated results
@@ -174,10 +174,6 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
-                
-                # Send our own EOF to the next worker (gateway)
-                logger.info(f"[TOP-CLIENTS-AGGREGATOR] Sending EOF to gateway for client {client_id}")
-                self.eof_handler.output_eof(client_id=client_id)
                 
                 # Clean up EOF counter for this client
                 with self.eof_count_lock:

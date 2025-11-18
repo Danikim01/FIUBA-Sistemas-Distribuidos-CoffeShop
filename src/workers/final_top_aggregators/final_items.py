@@ -200,7 +200,7 @@ class FinalItemsAggregator(AggregatorWorker):
                 logger.info(
                     f"[ITEMS-AGGREGATOR] All EOFs received for client {client_id} "
                     f"({eof_count}/{self.expected_eof_count}). "
-                    f"Sending final aggregated results and EOF."
+                    f"Sending final aggregated results."
                 )
                 
                 # Send final aggregated results
@@ -216,10 +216,6 @@ class FinalItemsAggregator(AggregatorWorker):
 
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
-                
-                # Send our own EOF to the next worker (gateway)
-                logger.info(f"[ITEMS-AGGREGATOR] Sending EOF to gateway for client {client_id}")
-                self.eof_handler.output_eof(client_id=client_id)
                 
                 # Clean up EOF counter for this client
                 with self.eof_count_lock:

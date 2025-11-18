@@ -12,10 +12,13 @@ logger = logging.getLogger(__name__)
 
 class ResultsHandler:
     """Handles result processing and stores formatted output into files."""
+    _QUERY_KEYS = ("AMOUNT_FILTER", "TOP_ITEMS", "TOP_CLIENTS_BIRTHDAYS", "TPV_SUMMARY")
+    _TOP_ITEMS_RESULT_TYPES = {"TOP_ITEMS_BY_QUANTITY", "TOP_ITEMS_BY_PROFIT"}
 
     def __init__(self, data_dir: os.PathLike[str] | str) -> None:
-        self.queries_expected = int(os.getenv("QUERIES_EXPECTED", "4")) # Default to 4 queries
-        self.queries_completed = 0
+        self.queries_expected = int(os.getenv("QUERIES_EXPECTED", str(len(self._QUERY_KEYS))))
+        self._completed_queries: set[str] = set()
+        self._top_items_parts_received: set[str] = set()
         self.query1_items_received = 0
         
         self.results_dir = Path(".results")
@@ -66,7 +69,8 @@ class ResultsHandler:
 
     def reset_session_state(self):
         """Reset state for a new session."""
-        self.queries_completed = 0
+        self._completed_queries.clear()
+        self._top_items_parts_received.clear()
         self.query1_items_received = 0
         if self.validator.enabled:
             self.validator.reset()
@@ -119,6 +123,30 @@ class ResultsHandler:
 
         return file_path
 
+    def _mark_query_completed(self, query_key: str) -> None:
+        """Mark a logical query as completed if it hasn't been recorded yet."""
+        if query_key not in self._QUERY_KEYS:
+            return
+        if query_key in self._completed_queries:
+            return
+
+        self._completed_queries.add(query_key)
+        logger.info(
+            "Query %s completada (%d/%d)",
+            query_key,
+            len(self._completed_queries),
+            len(self._QUERY_KEYS),
+        )
+
+    def _track_top_items_component(self, result_type: str) -> None:
+        """Track partial results for the top items query."""
+        if result_type not in self._TOP_ITEMS_RESULT_TYPES:
+            return
+
+        self._top_items_parts_received.add(result_type)
+        if self._TOP_ITEMS_RESULT_TYPES.issubset(self._top_items_parts_received):
+            self._mark_query_completed("TOP_ITEMS")
+
     def _validate_result(
         self,
         result_type: str,
@@ -143,17 +171,20 @@ class ResultsHandler:
         if result_type == "AMOUNT_FILTER_TRANSACTIONS":
             self._amount_validation_finalized = True
             self._amount_validation_pending = False
+            self._mark_query_completed("AMOUNT_FILTER")
 
     def _finalize_amount_transactions_validation(self) -> None:
         """Ensure the accumulated amount-filter results are validated once."""
 
-        if not self.validator.enabled:
-            return
-
         if self._amount_validation_finalized or not self._amount_validation_pending:
             return
 
-        self._validate_result("AMOUNT_FILTER_TRANSACTIONS", [], final=True)
+        if self.validator.enabled:
+            self._validate_result("AMOUNT_FILTER_TRANSACTIONS", [], final=True)
+        else:
+            self._amount_validation_finalized = True
+            self._amount_validation_pending = False
+            self._mark_query_completed("AMOUNT_FILTER")
 
     def print_validation_summary(self) -> None:
         """Print a summary of all validation results."""
@@ -368,6 +399,7 @@ class ResultsHandler:
         if normalized_type == "TPV_SUMMARY":
             rendered = self._render_tpv_summary(result, client_id)
             self._validate_result(normalized_type, rendered or [])
+            self._mark_query_completed("TPV_SUMMARY")
             return True
         if normalized_type == "TOP_ITEMS_BY_QUANTITY":
             logger.info(f"Processing TOP_ITEMS_BY_QUANTITY for client {client_id}: {result}")
@@ -380,6 +412,7 @@ class ResultsHandler:
             )
             logger.info(f"Rendered {len(rendered)} quantity results for client {client_id}")
             self._validate_result(normalized_type, rendered or [])
+            self._track_top_items_component("TOP_ITEMS_BY_QUANTITY")
             return True
         if normalized_type == "TOP_ITEMS_BY_PROFIT":
             logger.info(f"Processing TOP_ITEMS_BY_PROFIT for client {client_id}: {result}")
@@ -392,10 +425,12 @@ class ResultsHandler:
             )
             logger.info(f"Rendered {len(rendered)} profit results for client {client_id}")
             self._validate_result(normalized_type, rendered or [])
+            self._track_top_items_component("TOP_ITEMS_BY_PROFIT")
             return True
         if normalized_type == "TOP_CLIENTS_BIRTHDAYS":
             rendered = self._render_top_clients_birthdays(result, client_id)
             self._validate_result(normalized_type, rendered or [])
+            self._mark_query_completed("TOP_CLIENTS_BIRTHDAYS")
             return True
         if normalized_type == "AMOUNT_FILTER_TRANSACTIONS":
             rendered = self._render_amount_transactions(result, client_id)
@@ -404,9 +439,9 @@ class ResultsHandler:
             return True
         if normalized_type == "AMOUNT_FILTER_SUMMARY":
             summary_rows = result.get("results")
-            if not isinstance(summary_rows, list):
-                summary_rows = []
-            self._validate_result("AMOUNT_FILTER_TRANSACTIONS", summary_rows or [], final=True)
+            if isinstance(summary_rows, list) and summary_rows:
+                logger.info("Resumen de la consulta 1 recibido: %s", summary_rows)
+            self._validate_result("AMOUNT_FILTER_TRANSACTIONS", [], final=True)
             return True
 
         logger.debug("Resultado no reconocido, se omite: %s", result)
@@ -440,7 +475,7 @@ class ResultsHandler:
         try:
             logger.info("Waiting for processed results from gateway")
 
-            while self.queries_completed < self.queries_expected:
+            while len(self._completed_queries) < self.queries_expected:
                 chunk = socket_connection.recv(4096)
                 if not chunk:
                     logger.info("Gateway closed the connection")
@@ -460,9 +495,7 @@ class ResultsHandler:
                         logger.warning(f"Discarding malformed results payload: {exc}")
                         continue
 
-                    if not self.handle_results_message(message):
-                        logger.info("EOF received from gateway")
-                        self.queries_completed += 1
+                    self.handle_results_message(message)
 
         except KeyboardInterrupt:
             logger.info("Results listener interrupted by user")
@@ -471,4 +504,10 @@ class ResultsHandler:
         finally:
             self._finalize_amount_transactions_validation()
             logger.info(f"Total query 1 results received: {self.query1_items_received}")
+            if len(self._completed_queries) < len(self._QUERY_KEYS):
+                logger.warning(
+                    "Solo se completaron %s de %s consultas.",
+                    len(self._completed_queries),
+                    len(self._QUERY_KEYS),
+                )
             self.print_validation_summary()
