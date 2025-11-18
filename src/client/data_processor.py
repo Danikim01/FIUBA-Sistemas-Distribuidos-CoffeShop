@@ -108,14 +108,6 @@ class DataProcessor:
         # Calculate how many rows fit in the KB limit
         optimal_batch_size = max(1, int(max_batch_size_bytes / max_row_size))
         
-        # Special handling for stores (usually small files)
-        if data_type == DataType.STORES:
-            # For stores, use a smaller batch size since files are typically small
-            optimal_batch_size = min(optimal_batch_size, 100)
-        
-        # Cap at reasonable maximum to avoid memory issues
-        optimal_batch_size = min(optimal_batch_size, 10000)
-        
         logger.info(f"Calculated batch size for {data_type.name}: {optimal_batch_size} rows "
                    f"(max row size: {max_row_size} bytes, target: {self.max_batch_size_kb}KB)")
         

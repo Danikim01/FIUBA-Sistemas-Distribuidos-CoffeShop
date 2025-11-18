@@ -91,18 +91,18 @@ class ResponseCode(IntEnum):
     OK = 0
     ERROR = 1
 
-def send_all(sock: socket.socket, data: bytes) -> None:
+def send_all(sock: socket.socket, data: bytes | bytearray | memoryview) -> None:
     """Send all data through socket with circuit breaker protection"""
     if not _circuit_breaker.can_attempt():
         raise ConnectionError("Circuit breaker is open - too many recent failures")
     
     try:
-        total_sent = 0
-        while total_sent < len(data):
-            sent = sock.send(data[total_sent:])
+        view = memoryview(data)
+        while len(view):
+            sent = sock.send(view)
             if sent == 0:
                 raise ConnectionError("Socket connection broken")
-            total_sent += sent
+            view = view[sent:]
         
         _circuit_breaker.record_success()
         
@@ -116,15 +116,17 @@ def recv_all(sock: socket.socket, length: int) -> bytes:
         raise ConnectionError("Circuit breaker is open - too many recent failures")
     
     try:
-        data = b''
-        while len(data) < length:
-            chunk = sock.recv(length - len(data))
+        data = bytearray()
+        remaining = length
+        while remaining > 0:
+            chunk = sock.recv(remaining)
             if not chunk:
                 raise ConnectionError("Socket connection broken")
-            data += chunk
+            data.extend(chunk)
+            remaining -= len(chunk)
         
         _circuit_breaker.record_success()
-        return data
+        return bytes(data)
         
     except Exception as e:
         _circuit_breaker.record_failure()
@@ -264,19 +266,19 @@ def send_batch(sock: socket.socket, data_type: DataType, rows: List[Dict[str, An
     - Rows: serialized row data
     """
     # Serialize all rows
-    serialized_rows = b''
+    serialized_rows = bytearray()
     
     for row in rows:
         if data_type == DataType.TRANSACTIONS:
-            serialized_rows += serialize_transaction(row)
+            serialized_rows.extend(serialize_transaction(row))
         elif data_type == DataType.TRANSACTION_ITEMS:
-            serialized_rows += serialize_transaction_item(row)
+            serialized_rows.extend(serialize_transaction_item(row))
         elif data_type == DataType.USERS:
-            serialized_rows += serialize_user(row)
+            serialized_rows.extend(serialize_user(row))
         elif data_type == DataType.STORES:
-            serialized_rows += serialize_store(row)
+            serialized_rows.extend(serialize_store(row))
         elif data_type == DataType.MENU_ITEMS:
-            serialized_rows += serialize_menu_item(row)
+            serialized_rows.extend(serialize_menu_item(row))
         else:
             raise ValueError(f"Unknown data type: {data_type}")
     
@@ -284,12 +286,12 @@ def send_batch(sock: socket.socket, data_type: DataType, rows: List[Dict[str, An
     total_message_size = 4 + 4 + 4 + 4 + len(serialized_rows)
     
     # Build message
-    message = b''
-    message += pack_uint32(total_message_size)      # Total Message Size
-    message += pack_uint32(MessageType.BATCH)       # Message Type
-    message += pack_uint32(data_type)               # Data Type
-    message += pack_uint32(len(serialized_rows))    # Data Size (bytes)
-    message += serialized_rows                      # Rows
+    message = bytearray()
+    message.extend(pack_uint32(total_message_size)) # Total Message Size
+    message.extend(pack_uint32(MessageType.BATCH)) # Message Type
+    message.extend(pack_uint32(data_type)) # Data Type
+    message.extend(pack_uint32(len(serialized_rows))) # Data Size (bytes)
+    message.extend(serialized_rows) # Rows
     
     send_all(sock, message)
     logger.debug(f"Sent batch: type={data_type}, rows={len(rows)}, bytes={len(serialized_rows)}")
