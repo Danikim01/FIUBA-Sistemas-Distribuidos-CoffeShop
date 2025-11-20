@@ -12,7 +12,7 @@ from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
-from workers.utils.state_manager import UsersStateManager
+from workers.state_manager.users_state_manager import UsersStateManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

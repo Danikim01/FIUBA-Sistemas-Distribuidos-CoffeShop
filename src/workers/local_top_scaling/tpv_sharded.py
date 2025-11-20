@@ -11,7 +11,7 @@ from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
-from workers.utils.state_manager import TPVStateManager
+from workers.state_manager.tpv_state_manager import TPVStateManager
 
 # Configurar logging básico
 logging.basicConfig(level=logging.INFO)

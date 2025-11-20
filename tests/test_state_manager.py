@@ -29,7 +29,7 @@ if str(WORKERS_PATH) not in sys.path:
 if str(UTILS_PATH) not in sys.path:
     sys.path.insert(0, str(UTILS_PATH))
 
-from state_manager import TPVStateManager
+from workers.state_manager.tpv_state_manager import TPVStateManager
 from message_utils import ClientId
 
 # Test directory
