@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Improved state manager with per-client persistence for better scalability."""
+"""State manager with per-client persistence for better scalability."""
 
 import contextlib
 import hashlib
@@ -21,7 +21,7 @@ T = TypeVar('T')  # Type for the state data structure
 
 class StateManager(Generic[T]):
     """
-    Improved state manager with per-client persistence.
+    State manager with per-client persistence.
     
     Instead of persisting the entire state in a single file, this manager:
     - Persists each client's state in a separate file
@@ -42,7 +42,7 @@ class StateManager(Generic[T]):
                  worker_id: str = "0",
                  worker_type: str = "worker"):
         """
-        Initialize the improved state manager.
+        Initialize the state manager.
         
         Args:
             state_data: The state data structure to manage (optional, will be created if None)
@@ -51,7 +51,7 @@ class StateManager(Generic[T]):
             worker_id: Worker identifier for unique state files
             worker_type: Type of worker for naming
         """
-        logger.info("[IMPROVED-STATE-MANAGER] [INIT] Initializing ImprovedStateManager for worker_id=%s, worker_type=%s", 
+        logger.info("[STATE-MANAGER] [INIT] Initializing StateManager for worker_id=%s, worker_type=%s", 
                    worker_id, worker_type)
         self.state_data = state_data
         self.worker_id = worker_id
@@ -468,7 +468,7 @@ class StateManager(Generic[T]):
 
 class TPVStateManager(StateManager[DefaultDict[ClientId, DefaultDict[str, DefaultDict[int, float]]]]):
     """
-    Specialized improved state manager for TPV worker state structure.
+    Specialized state manager for TPV worker state structure.
     
     State structure: ClientId -> YearHalf -> StoreId -> float
     """
@@ -482,7 +482,7 @@ class TPVStateManager(StateManager[DefaultDict[ClientId, DefaultDict[str, Defaul
         if state_data is None:
             state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         
-        super().__init__(state_data, state_path, state_dir, worker_id, "tpv-worker-sharded-improved")
+        super().__init__(state_data, state_path, state_dir, worker_id, "tpv-worker-sharded")
     
     def _restore_client_state_from_map(self, client_id: ClientId, state_map: Any) -> None:
         """Restore a single client's TPV state from deserialized map."""
@@ -580,7 +580,7 @@ class TPVStateManager(StateManager[DefaultDict[ClientId, DefaultDict[str, Defaul
         
 class UsersStateManager(StateManager[DefaultDict[ClientId, DefaultDict[int, DefaultDict[int, int]]]]):
     """
-    Specialized improved state manager for Users worker state structure.
+    Specialized state manager for Users worker state structure.
     
     State structure: ClientId -> StoreId -> UserId -> int (purchase count)
     """
@@ -594,7 +594,7 @@ class UsersStateManager(StateManager[DefaultDict[ClientId, DefaultDict[int, Defa
         if state_data is None:
             state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
         
-        super().__init__(state_data, state_path, state_dir, worker_id, "users-worker-sharded-improved")
+        super().__init__(state_data, state_path, state_dir, worker_id, "users-worker-sharded")
     
     def _restore_client_state_from_map(self, client_id: ClientId, state_map: Any) -> None:
         """Restore a single client's Users state from deserialized map."""
@@ -698,7 +698,7 @@ class UsersStateManager(StateManager[DefaultDict[ClientId, DefaultDict[int, Defa
 
 class ItemsStateManager(StateManager[tuple[DefaultDict[ClientId, DefaultDict[str, DefaultDict[int, int]]], DefaultDict[ClientId, DefaultDict[str, DefaultDict[int, float]]]]]):
     """
-    Specialized improved state manager for Items worker state structure.
+    Specialized state manager for Items worker state structure.
     
     State structure: Two separate structures:
     - Quantity: ClientId -> YearMonth -> ItemId -> int
@@ -717,7 +717,7 @@ class ItemsStateManager(StateManager[tuple[DefaultDict[ClientId, DefaultDict[str
             profit_totals = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
             state_data = (quantity_totals, profit_totals)
         
-        super().__init__(state_data, state_path, state_dir, worker_id, "items-worker-sharded-improved")
+        super().__init__(state_data, state_path, state_dir, worker_id, "items-worker-sharded")
     
     @property
     def quantity_totals(self) -> DefaultDict[ClientId, DefaultDict[str, DefaultDict[int, int]]]:

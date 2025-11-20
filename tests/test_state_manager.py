@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Test script for ImprovedStateManager to verify functionality and performance."""
+"""Test script for StateManager to verify functionality and performance."""
 
 import json
 import logging
@@ -33,7 +33,7 @@ from state_manager import TPVStateManager
 from message_utils import ClientId
 
 # Test directory
-TEST_STATE_DIR = Path("test_state_improved")
+TEST_STATE_DIR = Path("test_state")
 
 
 def cleanup_test_dir():
@@ -258,7 +258,7 @@ def test_performance_comparison():
     
     num_clients = 100
     
-    # Test improved state manager
+    # Test state manager
     state_manager = TPVStateManager(
         state_dir=TEST_STATE_DIR,
         worker_id="test-perf"
@@ -579,7 +579,7 @@ def test_duplicate_detection():
 def run_all_tests():
     """Run all tests."""
     logger.info("\n" + "=" * 60)
-    logger.info("STARTING IMPROVED STATE MANAGER TESTS")
+    logger.info("STARTING STATE MANAGER TESTS")
     logger.info("=" * 60 + "\n")
     
     tests = [
