@@ -12,6 +12,7 @@ from message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
     extract_sequence_id,
+    extract_message_uuid,
     is_eof_message,
     create_message_with_metadata,
 )
@@ -81,8 +82,8 @@ class BaseWorker(ABC):
     def send_message(self, client_id: ClientId, data: Any, routing_key: str | None = None ,  **metadata):
         """Send a message to the output with client metadata.
         
-        Automatically propagates sequence_id from the current message being processed
-        if it exists and is not explicitly provided in metadata.
+        Automatically propagates sequence_id and message_uuid from the current message being processed
+        if they exist and are not explicitly provided in metadata.
         
         Args:
             client_id: Client identifier
@@ -90,14 +91,22 @@ class BaseWorker(ABC):
             routing_key: Optional routing key for exchange-based middleware
             **metadata: Additional metadata fields (including routing_key for exchanges)
         """
-        # Propagate sequence_id from current message if not explicitly provided
-        if 'sequence_id' not in metadata:
-            current_metadata = self._get_current_message_metadata()
-            if current_metadata:
+        current_metadata = self._get_current_message_metadata()
+        if current_metadata:
+            # Propagate sequence_id from current message if not explicitly provided
+            if 'sequence_id' not in metadata:
                 sequence_id = extract_sequence_id(current_metadata)
                 if sequence_id:
                     metadata['sequence_id'] = sequence_id
                     logger.debug(f"[WORKER {self.__class__.__name__}] Propagating sequence_id: {sequence_id}")
+            
+            # Propagate message_uuid from current message if not explicitly provided
+            # This ensures the same UUID is maintained throughout the entire pipeline
+            if 'message_uuid' not in metadata:
+                message_uuid = extract_message_uuid(current_metadata)
+                if message_uuid:
+                    metadata['message_uuid'] = message_uuid
+                    logger.debug(f"[WORKER {self.__class__.__name__}] Propagating message_uuid: {message_uuid}")
         
         message = create_message_with_metadata(client_id, data, **metadata)
         
@@ -108,14 +117,6 @@ class BaseWorker(ABC):
         else:
             self.middleware_config.output_middleware.send(message)
     
-    @abstractmethod
-    def process_message(self, message: dict, client_id: ClientId):
-        """Process a single message. Must be implemented by subclasses.
-        
-        Args:
-            message: Message to process
-        """
-        pass
     
     @abstractmethod
     def process_batch(self, batch: List[dict], client_id: ClientId):
@@ -163,14 +164,14 @@ class BaseWorker(ABC):
 
                     self._increment_inflight()
                     try:
-                        logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
+                        #logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
                         if isinstance(actual_data, list):
-                            logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
+                            #logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
                             self.process_batch(actual_data, client_id)
-                            logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
+                            #logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
                         else:
                             logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
-                            self.process_message(actual_data, client_id)
+       
                     finally:
                         self._decrement_inflight()
 

@@ -14,6 +14,7 @@ from workers.utils.sharding_utils import (
     extract_store_id_from_payload,
     extract_item_id_from_payload
 )
+from workers.utils.message_utils import create_message_with_metadata
 from common.models import (
     ChunkedDataMessage,
     DataMessage,
@@ -241,13 +242,13 @@ class QueueManager:
                 
                 # Send each sharded chunk to its routing key
                 for routing_key, sharded_chunk in sharded_chunks.items():
-                    message_with_metadata: ChunkedDataMessage = {
-                        'client_id': client_id,
-                        'data': sharded_chunk,
-                        'chunk_index': i,
-                        'total_chunks': len(chunks),
-                        'sequence_id': sequence_id
-                    }
+                    message_with_metadata = create_message_with_metadata(
+                        client_id=client_id,
+                        data=sharded_chunk,
+                        chunk_index=i,
+                        total_chunks=len(chunks),
+                        sequence_id=sequence_id
+                    )
                     self.transactions_exchange.send(message_with_metadata, routing_key=routing_key)
                     logger.debug(
                         f"Sent chunk {i+1}/{len(chunks)} with {len(sharded_chunk)} transactions "
@@ -268,11 +269,11 @@ class QueueManager:
             batch_num = self._get_next_batch_num(client_id)
             sequence_id = self._generate_sequence_id(client_id, batch_num)
             
-            message_with_metadata: DataMessage = {
-                'client_id': client_id,
-                'data': stores,
-                'sequence_id': sequence_id
-            }
+            message_with_metadata = create_message_with_metadata(
+                client_id=client_id,
+                data=stores,
+                sequence_id=sequence_id
+            )
             self.stores_exchange.send(message_with_metadata)
             logger.info("Sent %s stores to exchange %s for client %s, sequence_id: %s", len(stores), self.config.stores_exchange_name, client_id, sequence_id)
         except Exception as e:
@@ -288,11 +289,11 @@ class QueueManager:
             batch_num = self._get_next_batch_num(client_id)
             sequence_id = self._generate_sequence_id(client_id, batch_num)
             
-            message_with_metadata: DataMessage = {
-                'client_id': client_id,
-                'data': users,
-                'sequence_id': sequence_id
-            }
+            message_with_metadata = create_message_with_metadata(
+                client_id=client_id,
+                data=users,
+                sequence_id=sequence_id
+            )
             self.users_queue.send(message_with_metadata)
             logger.debug("Sent %s users to queue %s for client %s, sequence_id: %s", len(users), self.config.users_queue_name, client_id, sequence_id)
         except Exception as e:
@@ -345,13 +346,13 @@ class QueueManager:
                 
                 # Send each sharded chunk to its routing key
                 for routing_key, sharded_chunk in sharded_chunks.items():
-                    message_with_metadata: ChunkedDataMessage = {
-                        'client_id': client_id,
-                        'data': sharded_chunk,
-                        'chunk_index': i,
-                        'total_chunks': len(chunks),
-                        'sequence_id': sequence_id
-                    }
+                    message_with_metadata = create_message_with_metadata(
+                        client_id=client_id,
+                        data=sharded_chunk,
+                        chunk_index=i,
+                        total_chunks=len(chunks),
+                        sequence_id=sequence_id
+                    )
                     self.transaction_items_exchange.send(message_with_metadata, routing_key=routing_key)
                     logger.debug(
                         "Sent chunk %s/%s with %s transaction items to %s for client %s, sequence_id: %s",
@@ -375,11 +376,11 @@ class QueueManager:
             batch_num = self._get_next_batch_num(client_id)
             sequence_id = self._generate_sequence_id(client_id, batch_num)
             
-            message_with_metadata: DataMessage = {
-                'client_id': client_id,
-                'data': menu_items,
-                'sequence_id': sequence_id
-            }
+            message_with_metadata = create_message_with_metadata(
+                client_id=client_id,
+                data=menu_items,
+                sequence_id=sequence_id
+            )
             self.menu_items_queue.send(message_with_metadata)
             logger.info("Menu items sent to queue %s for client %s, sequence_id: %s", self.config.menu_items_queue_name, client_id, sequence_id)
         except Exception as e:
@@ -401,12 +402,13 @@ class QueueManager:
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
             # Create EOF message with sequence_id BEFORE the loop
-            eof_message: EOFMessage = {
-                'client_id': client_id,
-                'type': 'EOF',
-                'data_type': 'TRANSACTIONS',
-                'sequence_id': sequence_id
-            }
+            eof_message = create_message_with_metadata(
+                client_id=client_id,
+                data={},
+                message_type='EOF',
+                data_type='TRANSACTIONS',
+                sequence_id=sequence_id
+            )
             
             # Send the SAME eof_message (with same sequence_id) to each routing key
             for i in range(replica_count):
@@ -428,12 +430,13 @@ class QueueManager:
             eof_batch_num = last_batch_num + 1
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
-            eof_message: EOFMessage = {
-                'client_id': client_id,
-                'type': 'EOF',
-                'data_type': 'USERS',
-                'sequence_id': sequence_id
-            }
+            eof_message = create_message_with_metadata(
+                client_id=client_id,
+                data={},
+                message_type='EOF',
+                data_type='USERS',
+                sequence_id=sequence_id
+            )
             self.users_queue.send(eof_message)
             logger.info("Propagated EOF to users queue for client %s, sequence_id: %s", client_id, sequence_id)
         except Exception as exc:
@@ -448,12 +451,13 @@ class QueueManager:
             eof_batch_num = last_batch_num + 1
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
-            eof_message: EOFMessage = {
-                'client_id': client_id,
-                'type': 'EOF',
-                'data_type': 'STORES',
-                'sequence_id': sequence_id
-            }
+            eof_message = create_message_with_metadata(
+                client_id=client_id,
+                data={},
+                message_type='EOF',
+                data_type='STORES',
+                sequence_id=sequence_id
+            )
             self.stores_exchange.send(eof_message)
             logger.info("Propagated EOF to stores exchange %s for client %s, sequence_id: %s", self.config.stores_exchange_name, client_id, sequence_id)
         except Exception as exc:
@@ -474,12 +478,13 @@ class QueueManager:
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
             # Create EOF message with sequence_id BEFORE the loop
-            eof_message: EOFMessage = {
-                'client_id': client_id,
-                'type': 'EOF',
-                'data_type': 'TRANSACTION_ITEMS',
-                'sequence_id': sequence_id
-            }
+            eof_message = create_message_with_metadata(
+                client_id=client_id,
+                data={},
+                message_type='EOF',
+                data_type='TRANSACTION_ITEMS',
+                sequence_id=sequence_id
+            )
             
             # Send the SAME eof_message (with same sequence_id) to each routing key
             for i in range(replica_count):
@@ -505,12 +510,13 @@ class QueueManager:
             eof_batch_num = last_batch_num + 1
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
-            eof_message: EOFMessage = {
-                'client_id': client_id,
-                'type': 'EOF',
-                'data_type': 'MENU_ITEMS',
-                'sequence_id': sequence_id
-            }
+            eof_message = create_message_with_metadata(
+                client_id=client_id,
+                data={},
+                message_type='EOF',
+                data_type='MENU_ITEMS',
+                sequence_id=sequence_id
+            )
             self.menu_items_queue.send(eof_message)
             logger.info("Propagated EOF to menu items queue for client %s, sequence_id: %s", client_id, sequence_id)
         except Exception as exc:

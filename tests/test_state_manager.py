@@ -165,7 +165,6 @@ def test_incremental_persistence():
     
     # Modify only client-001
     state_manager.state_data["client-001"]["2024-H1"][1] = 200.0
-    state_manager.mark_client_modified("client-001")
     state_manager.persist_state("client-001")
     
     # Wait a bit to ensure file write is complete

@@ -47,7 +47,7 @@ class FilterEOFBarrier(BaseWorker):
             f"\033[33m[FILTER-EOF-BARRIER] Forwarding messages immediately, outputing single EOF after receiving all EOFs from replicas\033[0m"
         )
         logger.info(
-            f"\033[33m[FILTER-EOF-BARRIER] Deduplication enabled to handle message retries\033[0m"
+            f"\033[33m[FILTER-EOF-BARRIER] Robust deduplication enabled with two-phase commit persistence to handle message retries from filter workers\033[0m"
         )
     
     def _get_current_message_uuid(self) -> str | None:
@@ -68,8 +68,8 @@ class FilterEOFBarrier(BaseWorker):
         """
         message_uuid = self._get_current_message_uuid()
         if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
-            logger.debug(
-                "[FILTER-EOF-BARRIER] Duplicate message %s for client %s detected; skipping processing",
+            logger.info(
+                f"\033[33m[FILTER-EOF-BARRIER] Duplicate message {message_uuid} for client {client_id} detected; skipping processing\033[0m",
                 message_uuid,
                 client_id,
             )
@@ -80,28 +80,6 @@ class FilterEOFBarrier(BaseWorker):
         """Mark a message as processed."""
         if message_uuid:
             self._processed_store.mark_processed(client_id, message_uuid)
-    
-    def process_message(self, message: Any, client_id: ClientId):
-        """
-        Process regular data message - forward immediately.
-        
-        Args:
-            message: Message data to forward
-            client_id: Client identifier
-        """
-        # Check for duplicates
-        duplicate, message_uuid = self._check_duplicate(client_id)
-        if duplicate:
-            return
-        
-        try:
-            # Forward message immediately without accumulating
-            self.send_message(client_id=client_id, data=message)
-            logger.debug(
-                f"[FILTER-EOF-BARRIER] Forwarded message immediately for client {client_id}"
-            )
-        finally:
-            self._mark_processed(client_id, message_uuid)
     
     def process_batch(self, batch: list, client_id: ClientId):
         """
@@ -172,7 +150,7 @@ class FilterEOFBarrier(BaseWorker):
                 self.end_of_file_received[client_id] = 0
             
             # Clear processed state for this client when all EOFs are received
-            self._processed_store.clear_client(client_id)
+            #self._processed_store.clear_client(client_id)
     
     def _propagate_eof(self, client_id: ClientId):
         """
