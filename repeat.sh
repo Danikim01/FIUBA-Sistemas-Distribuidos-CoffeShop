@@ -44,7 +44,7 @@ for i in $(seq 1 $NUM_ITERATIONS); do
     
     echo "Capturando logs de los clientes..."
     
-    CLIENT_CONTAINERS=$(docker ps --format '{{.Names}}' | grep -i client | sort)
+    CLIENT_CONTAINERS=$(docker ps -a --format '{{.Names}}' | grep -E '^coffee-client-[0-9]+$' | sort -V)
     
     if [ -z "$CLIENT_CONTAINERS" ]; then
         echo "Advertencia: No se encontraron contenedores de clientes en la iteración $i"
@@ -56,7 +56,7 @@ for i in $(seq 1 $NUM_ITERATIONS); do
             docker logs --tail 16 "$container" > "$LOG_FILE" 2>&1
             CLIENT_NUM=$((CLIENT_NUM + 1))
         done
-        echo "Logs guardados para la iteración $i"
+        echo "Logs guardados para la iteración $i (${CLIENT_NUM} clientes)"
     fi
     
     if [ $i -lt $NUM_ITERATIONS ]; then
