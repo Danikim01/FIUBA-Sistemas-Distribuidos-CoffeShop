@@ -7,7 +7,7 @@ import os
 import threading
 import uuid
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from workers.utils.worker_utils import run_main
 from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
@@ -36,6 +36,9 @@ class ShardingRouter(BaseWorker):
         # Batch storage: {client_id: {routing_key: [messages]}}
         self.batches: Dict[ClientId, Dict[str, List[Any]]] = defaultdict(lambda: defaultdict(list))
         self.batch_lock = threading.RLock()
+        
+        # Track statistics for debugging: {client_id: {routing_key: {'count': int, 'batches_sent': int}}}
+        self.stats: Dict[ClientId, Dict[str, Dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: {'count': 0, 'batches_sent': 0}))
         
         logger.info(f"ShardingRouter initialized with {self.num_shards} shards, batch_size={self.batch_size}")
 
@@ -85,6 +88,9 @@ class ShardingRouter(BaseWorker):
             # Add message to batch
             self.batches[client_id][routing_key].append(message)
             
+            # Update statistics
+            self.stats[client_id][routing_key]['count'] += 1
+            
             # If batch is full, flush it immediately
             if len(self.batches[client_id][routing_key]) >= self.batch_size:
                 self._flush_batch(client_id, routing_key)
@@ -106,7 +112,8 @@ class ShardingRouter(BaseWorker):
                 return
             
             # Send batch
-            logger.info(f"Flushing batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
+            batch_size = len(batch)
+            logger.info(f"Flushing batch for client {client_id}, shard {routing_key}, size: {batch_size}")
             self.send_message(
                 client_id,
                 batch,
@@ -114,10 +121,13 @@ class ShardingRouter(BaseWorker):
                 # message_uuid=str(uuid.uuid4()),
             )
             
+            # Update statistics
+            self.stats[client_id][routing_key]['batches_sent'] += 1
+            
             # Clear batch
             self.batches[client_id][routing_key] = []
     
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId) -> None:
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None) -> None:
         """
         Handle EOF by flushing all remaining batches for the client, then sending EOF.
         
@@ -133,6 +143,19 @@ class ShardingRouter(BaseWorker):
         )
         
         with self._pause_message_processing():
+            # Log statistics before flushing
+            with self.batch_lock:
+                if client_id in self.stats:
+                    logger.info(f"\033[35m[SHARDING-ROUTER] Statistics for client {client_id}:\033[0m")
+                    for routing_key in sorted(self.stats[client_id].keys()):
+                        stats = self.stats[client_id][routing_key]
+                        current_batch_size = len(self.batches[client_id].get(routing_key, []))
+                        logger.info(
+                            f"  {routing_key}: {stats['count']} messages processed, "
+                            f"{stats['batches_sent']} batches sent, "
+                            f"{current_batch_size} messages in current batch"
+                        )
+            
             # Collect all remaining batches to flush, grouped by shard
             with self.batch_lock:
                 batches_by_shard = {}
@@ -142,6 +165,15 @@ class ShardingRouter(BaseWorker):
                         if batch:
                             batches_by_shard[routing_key] = batch.copy()  # Make a copy to avoid issues
                             logger.info(f"Found final batch for client {client_id}, shard {routing_key}, size: {len(batch)}")
+                    # Log if any shards have no batches
+                    all_shards = [f"shard_{i}" for i in range(self.num_shards)]
+                    shards_with_batches = set(batches_by_shard.keys())
+                    shards_without_batches = set(all_shards) - shards_with_batches
+                    if shards_without_batches:
+                        logger.info(
+                            f"Shards with no final batches for client {client_id}: {sorted(shards_without_batches)} "
+                            f"(likely already flushed when batch_size was reached)"
+                        )
             
             # Send all batches first (synchronously), grouped by shard
             # We do this outside the lock to avoid holding it during I/O
@@ -155,15 +187,20 @@ class ShardingRouter(BaseWorker):
                         routing_key=routing_key,
                         message_uuid=str(uuid.uuid4()),
                     )
+                    # Update statistics
+                    with self.batch_lock:
+                        self.stats[client_id][routing_key]['batches_sent'] += 1
+            else:
+                logger.info(f"No final batches to flush for client {client_id} (all batches already sent when batch_size was reached)")
             
             # Clean up client data after all batches are sent
             with self.batch_lock:
                 if client_id in self.batches:
                     del self.batches[client_id]
-            
-            # Only after all batches are sent, send EOF to each shard
-            # Send EOF to all shards (even if they didn't receive batches) to ensure
-            # all sharded workers know the stream has ended
+                # Keep stats for debugging but could clear them here if needed
+                # if client_id in self.stats:
+                #     del self.stats[client_id]
+
             logger.info(
                 f"\033[36m[SHARDING-ROUTER] All batches flushed for client {client_id}. "
                 f"Now propagating EOF to all {self.num_shards} shards\033[0m"
@@ -176,13 +213,8 @@ class ShardingRouter(BaseWorker):
                 )
                 try:
                     # Send EOF directly to each routing key (no coordination needed for sharding router)
-                    self.eof_handler.handle_eof_with_routing_key(client_id=client_id, routing_key=routing_key, message=message,exchange=self.middleware_config.output_exchange)
-                    # self.send_message(
-                    #     client_id=client_id,
-                    #     data=None,
-                    #     message_type='EOF',
-                    #     routing_key=routing_key
-                    # )
+                    new_message_uuid_from_sharding_router = str(uuid.uuid4())
+                    self.eof_handler.handle_eof_with_routing_key(client_id=client_id, routing_key=routing_key, message=message,exchange=self.middleware_config.output_exchange, message_uuid=new_message_uuid_from_sharding_router)
                     logger.debug(
                         f"[SHARDING-ROUTER] EOF sent successfully to {routing_key} for client {client_id}"
                     )

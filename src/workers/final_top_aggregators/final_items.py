@@ -6,8 +6,7 @@ import logging
 import os
 import threading
 from collections import defaultdict
-from typing import Any, DefaultDict, Dict, List, Mapping
-
+from typing import Any, DefaultDict, Dict, List, Mapping, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
 from workers.extra_source.menu_items import MenuItemsExtraSource
@@ -170,7 +169,7 @@ class FinalItemsAggregator(AggregatorWorker):
             }
         }
 
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
         """
         Handle EOF from sharded workers.
         

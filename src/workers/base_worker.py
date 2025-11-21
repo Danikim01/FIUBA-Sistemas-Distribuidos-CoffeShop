@@ -16,6 +16,7 @@ from message_utils import ( # pyright: ignore[reportMissingImports]
     is_eof_message,
     create_message_with_metadata,
 )
+from typing import Optional
 
 from healthcheck.service import HealthcheckService
 
@@ -112,7 +113,7 @@ class BaseWorker(ABC):
         
         # Send message with routing_key if it's an exchange middleware
         if routing_key:
-            logger.info(f"[WORKER {self.__class__.__name__}] Sending message to routing key: {routing_key}")
+            #logger.info(f"[WORKER {self.__class__.__name__}] Sending message to routing key: {routing_key}")
             self.middleware_config.output_middleware.send(message, routing_key=routing_key)
         else:
             self.middleware_config.output_middleware.send(message)
@@ -128,9 +129,16 @@ class BaseWorker(ABC):
         pass
 
     # overwritten by top worker
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
+        """Handle EOF message.
+        
+        Args:
+            message: EOF message dictionary
+            client_id: Client identifier
+            message_uuid: Optional message UUID from the original message
+        """
         with self._pause_message_processing():
-            self.eof_handler.handle_eof(message, client_id)
+            self.eof_handler.handle_eof(message, client_id, message_uuid)
 
     def start_consuming(self):
         """Start consuming messages from the input queue."""
@@ -148,10 +156,10 @@ class BaseWorker(ABC):
 
                     self._current_message_metadata = message
 
-                    client_id, actual_data = extract_data_and_client_id(message)
+                    client_id, actual_data, message_uuid = extract_data_and_client_id(message)
                     
                     if is_eof_message(message):
-                        return self.handle_eof(message, client_id)
+                        return self.handle_eof(message, client_id, message_uuid)
 
                     # Validate actual_data before processing
                     if not isinstance(actual_data, (dict, list)):

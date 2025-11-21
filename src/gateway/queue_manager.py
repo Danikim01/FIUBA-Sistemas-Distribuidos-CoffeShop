@@ -5,6 +5,7 @@ import queue
 import threading
 from typing import List, Any, Union
 from contextlib import suppress
+import uuid
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
 from config import GatewayConfig
@@ -392,6 +393,7 @@ class QueueManager:
         
         Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
         CRITICAL: Generate sequence_id ONCE before the loop to ensure all Filter Workers receive the same sequence_id.
+        Each EOF includes routing_key in metadata to allow filter workers to identify their replica.
         """
         try:
             replica_count = self.config.filter_replica_count
@@ -401,18 +403,21 @@ class QueueManager:
             eof_batch_num = last_batch_num + 1
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
-            # Create EOF message with sequence_id BEFORE the loop
-            eof_message = create_message_with_metadata(
-                client_id=client_id,
-                data={},
-                message_type='EOF',
-                data_type='TRANSACTIONS',
-                sequence_id=sequence_id
-            )
-            
-            # Send the SAME eof_message (with same sequence_id) to each routing key
+            # Send EOF to each routing key with routing_key in metadata
             for i in range(replica_count):
                 routing_key = f"shard_{i}"
+                # Create EOF message with routing_key in metadata for each replica
+                message_uuid = str(uuid.uuid4())
+                eof_message = create_message_with_metadata(
+                    client_id=client_id,
+                    data={},
+                    message_type='EOF',
+                    data_type='TRANSACTIONS',
+                    sequence_id=sequence_id,
+                    message_uuid=message_uuid
+                )
+                logger.info(f"==================PROPAGATING EOF MESSAGE FOR TRANSACTIONS==================")
+                logger.info(f"\033[33m[QUEUE-MANAGER] EOF MESSAGE: {eof_message}\033[0m")
                 self.transactions_exchange.send(eof_message, routing_key=routing_key)
             logger.info(
                 "Propagated %d EOFs to transactions exchange for client %s (one per routing key), sequence_id: %s",
@@ -468,6 +473,7 @@ class QueueManager:
         
         Sends EOF to each routing key (shard_0, shard_1, shard_2) so each filter worker receives one.
         CRITICAL: Generate sequence_id ONCE before the loop to ensure all Filter Workers receive the same sequence_id.
+        Each EOF includes routing_key in metadata to allow filter workers to identify their replica.
         """
         try:
             replica_count = self.config.filter_replica_count
@@ -477,18 +483,21 @@ class QueueManager:
             eof_batch_num = last_batch_num + 1
             sequence_id = self._generate_sequence_id(client_id, eof_batch_num)
             
-            # Create EOF message with sequence_id BEFORE the loop
-            eof_message = create_message_with_metadata(
-                client_id=client_id,
-                data={},
-                message_type='EOF',
-                data_type='TRANSACTION_ITEMS',
-                sequence_id=sequence_id
-            )
-            
-            # Send the SAME eof_message (with same sequence_id) to each routing key
+            # Send EOF to each routing key with routing_key in metadata
             for i in range(replica_count):
                 routing_key = f"shard_{i}"
+                # Create EOF message with routing_key in metadata for each replica
+                message_uuid = str(uuid.uuid4())
+                eof_message = create_message_with_metadata(
+                    client_id=client_id,
+                    data={},
+                    message_type='EOF',
+                    data_type='TRANSACTION_ITEMS',
+                    sequence_id=sequence_id,
+                    message_uuid=message_uuid
+                )
+                logger.info(f"==================PROPAGATING EOF MESSAGE FOR TRANSACTION ITEMS==================")
+                logger.info(f"\033[33m[QUEUE-MANAGER] EOF MESSAGE: {eof_message}\033[0m")
                 self.transaction_items_exchange.send(eof_message, routing_key=routing_key)
             logger.info(
                 "Propagated %d EOFs to transaction items exchange for client %s (one per routing key), sequence_id: %s",

@@ -6,7 +6,7 @@ import logging
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List
+from typing import Any, DefaultDict, Dict, List, Optional
 
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_month # pyright: ignore[reportMissingImports]
@@ -251,7 +251,7 @@ class ShardedItemsWorker(AggregatorWorker):
                         self.state_manager.set_last_processed_message(client_id, previous_uuid)
                 raise
 
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
         """
         Handle EOF by sending data to aggregator and then sending EOF directly to output.
         

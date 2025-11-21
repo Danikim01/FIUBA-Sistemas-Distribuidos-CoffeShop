@@ -5,11 +5,12 @@
 import logging
 import os
 import threading
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Optional
+import uuid
 
 from workers.base_worker import BaseWorker
 from workers.utils.worker_utils import run_main
-from workers.utils.message_utils import ClientId, is_eof_message
+from workers.utils.message_utils import ClientId, is_eof_message, extract_message_uuid
 from workers.utils.processed_message_store import ProcessedMessageStore
 
 logging.basicConfig(level=logging.INFO)
@@ -69,9 +70,7 @@ class FilterEOFBarrier(BaseWorker):
         message_uuid = self._get_current_message_uuid()
         if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
             logger.info(
-                f"\033[33m[FILTER-EOF-BARRIER] Duplicate message {message_uuid} for client {client_id} detected; skipping processing\033[0m",
-                message_uuid,
-                client_id,
+                f"\033[33m[FILTER-EOF-BARRIER] Duplicate message {message_uuid} for client {client_id} detected; skipping processing\033[0m"
             )
             return True, message_uuid
         return False, message_uuid
@@ -110,24 +109,35 @@ class FilterEOFBarrier(BaseWorker):
         finally:
             self._mark_processed(client_id, message_uuid)
     
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
         """
-        Handle EOF message - count and propagate when all replicas have sent EOF.
-        
-        When all EOFs are received, propagates EOF to output.
-        
+        Handle EOF message - count and propagate when all replicas have sent EOF.        
         Args:
             message: EOF message
             client_id: Client identifier
+            message_uuid: Optional message UUID from the original message
         """
-        # Increment EOF counter for this client
+        # Get message_uuid and routing_key from message
+        if not message_uuid:
+            logger.info(f"\033[33m[FILTER-EOF-BARRIER] No message UUID found in message: {message}\033[0m")
+            message_uuid = extract_message_uuid(message)
+         
+        # Deduplicate using composite identifier
+        if self._processed_store.has_processed(client_id, message_uuid):
+            logger.info(
+                f"\033[33m[FILTER-EOF-BARRIER] Duplicate EOF {message_uuid} for client {client_id} detected; skipping\033[0m"
+                f"for client {client_id} detected; skipping\033[0m"
+            )
+            return 
+
         with self.eof_lock:
             self.end_of_file_received[client_id] = self.end_of_file_received.get(client_id, 0) + 1
             current_count = self.end_of_file_received[client_id]
         
         # Log when EOF is received (cyan color)
         logger.info(
-            f"\033[36m[FILTER-EOF-BARRIER] Received EOF marker for client {client_id} - "
+            f"\033[36m[FILTER-EOF-BARRIER] Received EOF marker for client {client_id} "
+            f"with message_uuid {message_uuid} - "
             f"count: {current_count}/{self.replica_count}\033[0m"
         )
         
@@ -139,10 +149,12 @@ class FilterEOFBarrier(BaseWorker):
                 f"({current_count}/{self.replica_count}), propagating EOF\033[0m"
             )
             
-            # Propagate EOF to output
-            self.eof_handler.output_eof(client_id=client_id)
+            # Propagate EOF to output with message_uuid
+            new_message_uuid_from_eof_barrier = str(uuid.uuid4())
+            self.eof_handler.output_eof(client_id=client_id, message_uuid=new_message_uuid_from_eof_barrier)
             logger.info(
-                f"\033[32m[FILTER-EOF-BARRIER] EOF propagated for client {client_id}\033[0m"
+                f"\033[32m[FILTER-EOF-BARRIER] EOF propagated for client {client_id} "
+                f"with new message_uuid {new_message_uuid_from_eof_barrier}\033[0m"
             )
                 
             # Reset counter for this client
@@ -150,49 +162,12 @@ class FilterEOFBarrier(BaseWorker):
                 self.end_of_file_received[client_id] = 0
             
             # Clear processed state for this client when all EOFs are received
-            #self._processed_store.clear_client(client_id)
-    
-    def _propagate_eof(self, client_id: ClientId):
-        """
-        Propagate EOF message to output (exchange or queue).
+            self._processed_store.clear_client(client_id)
         
-        Args:
-            client_id: Client identifier
-        """
-        output_target = self.middleware_config.get_output_target()
-        
-        try:
-            # For exchanges, use the exchange name as routing_key to ensure
-            # the message reaches all queues bound to that exchange
-            if self.middleware_config.has_output_exchange():
-                routing_key = self.middleware_config.output_exchange
-                logger.debug(
-                    f"[FILTER-EOF-BARRIER] Sending EOF to exchange '{routing_key}' "
-                    f"with routing_key '{routing_key}' for client {client_id}"
-                )
-                self.send_message(
-                    client_id=client_id,
-                    data=None,
-                    message_type='EOF',
-                    routing_key=routing_key
-                )
-                # self.eof_handler.handle_eof_with_routing_key(client_id=client_id, routing_key=routing_key, message=None,exchange=self.middleware_config.output_exchange)
-            else:
-                # For queues, no routing_key needed
-                self.send_message(client_id=client_id, data=None, message_type='EOF')
-            
-            # Log when EOF is sent (green color)
-            logger.info(
-                f"\033[32m[FILTER-EOF-BARRIER] EOF sent to {output_target} for client {client_id}\033[0m"
-            )
-        except Exception as e:
-            # Log error in red
-            logger.error(
-                f"\033[31m[FILTER-EOF-BARRIER] Failed to propagate EOF to {output_target} for client {client_id}: {e}\033[0m",
-                exc_info=True
-            )
-            raise
-
+        # Mark EOF as processed using composite identifier
+        if message_uuid:
+            logger.info(f"\033[33m[FILTER-EOF-BARRIER] Marking EOF {message_uuid} as processed for client {client_id}\033[0m")
+            self._processed_store.mark_processed(client_id, message_uuid)
 
 if __name__ == "__main__":
     run_main(FilterEOFBarrier)

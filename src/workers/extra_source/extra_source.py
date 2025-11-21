@@ -33,7 +33,7 @@ class ExtraSource(ABC):
 
         def on_message(message):
             try:
-                client_id, data = extract_data_and_client_id(message)
+                client_id, data, _ = extract_data_and_client_id(message)
                 self.current_client_id = client_id
 
                 if self.clients_done.is_client_done(client_id):

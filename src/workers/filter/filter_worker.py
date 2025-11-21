@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 import os
 from abc import abstractmethod
-from typing import List, Tuple, Union
+from typing import List, Tuple, Union, Optional
 from workers.base_worker import BaseWorker
 from workers.utils.processed_message_store import ProcessedMessageStore
+from workers.utils.message_utils import extract_message_uuid
 
 from common.models import (
     EOFMessage,
@@ -94,17 +95,33 @@ class FilterWorker(BaseWorker):
         # finally:
         #     self._mark_processed(client_id, message_uuid)
 
-    def handle_eof(self, message: EOFMessage, client_id: str):
+    def handle_eof(self, message: EOFMessage, client_id: str, message_uuid: Optional[str] = None):
         """
         Send EOF to filter aggregator.
         
         The aggregator will count EOFs from all replicas and propagate when complete.
-        Clear processed state for this client when EOF is received.
-        """
-        # Clear processed state for this client when EOF is received
-        #self._processed_store.clear_client(client_id)
+        Includes replica_id to allow the barrier to distinguish EOFs from different replicas
+        while still deduplicating retries from the same replica.
         
-        # Send EOF to filter aggregator
-        self.eof_handler.output_eof(client_id=client_id)
-        logger.info(f"\033[36m[FILTER] EOF sent to aggregator for client {client_id}\033[0m")
+        Args:
+            message: EOF message
+            client_id: Client identifier
+            message_uuid: Optional message UUID from the original message
+        """
+        # Get current message metadata to extract routing_key and replica_id
+        current_metadata = self._get_current_message_metadata()
+        
+        # Use provided message_uuid or extract from metadata
+        if not message_uuid:
+            message_uuid = extract_message_uuid(current_metadata) if current_metadata else None
+        
+        # Send EOF to filter aggregator with replica_id for deduplication
+        self.eof_handler.output_eof(
+            client_id=client_id,
+            message_uuid=message_uuid,
+        )
+        logger.info(
+            f"\033[36m[FILTER] EOF sent to aggregator for client {client_id} "
+            f"(message_uuid: {message_uuid})\033[0m"
+        )
         

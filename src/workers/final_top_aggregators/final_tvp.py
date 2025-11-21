@@ -2,7 +2,7 @@ from collections import defaultdict
 import logging
 import os
 import threading
-from typing import Any, DefaultDict, Dict, List
+from typing import Any, DefaultDict, Dict, List, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
 from workers.local_top_scaling.tpv_sharded import StoreId, YearHalf
@@ -80,7 +80,7 @@ class TPVAggregator(AggregatorWorker):
             "list_type": "TPV_SUMMARY",
         }
 
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
         """
         Handle EOF from sharded workers.
         

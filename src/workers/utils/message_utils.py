@@ -20,21 +20,23 @@ def is_eof_message(message: Any) -> bool:
     return isinstance(message, dict) and str(message.get('type', '')).upper() == 'EOF'
 
 
-def extract_data_and_client_id(message: dict) -> tuple[ClientId, dict[str, Any]]:
-    """Extract client_id and actual data from message with metadata.
+def extract_data_and_client_id(message: dict) -> tuple[ClientId, dict[str, Any], Optional[str]]:
+    """Extract client_id, actual data, and message_uuid from message with metadata.
     
     Args:
         message: Message that may contain client metadata
         
     Returns:
-        tuple: (client_id, actual_data)
+        tuple: (client_id, actual_data, message_uuid)
     """
     client_id = message.get('client_id', '')
+    message_uuid = extract_message_uuid(message)
+    
     if 'data' in message and message.get('type') != 'EOF':
-        return client_id, message['data']
+        return client_id, message['data'], message_uuid
     
     # For EOF return the whole message
-    return client_id, message
+    return client_id, message, message_uuid
     
 def create_message_with_metadata(
     client_id: str,

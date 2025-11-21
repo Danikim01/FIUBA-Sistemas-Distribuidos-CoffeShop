@@ -6,7 +6,7 @@ import logging
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
@@ -238,7 +238,7 @@ class ShardedTPVWorker(AggregatorWorker):
 
         return results
 
-    def handle_eof(self, message: Dict[str, Any], client_id: ClientId):
+    def handle_eof(self, message: Dict[str, Any], client_id: ClientId, message_uuid: Optional[str] = None):
         """
         Handle EOF by sending data to aggregator and then sending EOF directly to output.
         
@@ -299,7 +299,7 @@ class ShardedTPVWorker(AggregatorWorker):
                 from workers.utils.message_utils import extract_sequence_id
                 sequence_id = extract_sequence_id(message)
                 logger.info(f"[EOF] [SHARDED-WORKER] Sending EOF directly to TPV aggregator for client {client_id} (no consensus), sequence_id: {sequence_id}")
-                self.eof_handler.output_eof(client_id=client_id, sequence_id=sequence_id)
+                self.eof_handler.output_eof(client_id=client_id, sequence_id=sequence_id, message_uuid=message_uuid)
                 
             except Exception:
                 raise
