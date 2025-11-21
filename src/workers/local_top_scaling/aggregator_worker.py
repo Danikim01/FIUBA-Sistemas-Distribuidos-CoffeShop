@@ -75,10 +75,6 @@ class AggregatorWorker(BaseWorker):
 
             super().handle_eof(message, client_id)
 
-    def process_message(self, message: dict, client_id: ClientId):
-        with self._state_lock:
-            self.accumulate_transaction(client_id, message)
-
     def process_batch(self, batch: list, client_id: ClientId):
         with self._state_lock:
             for entry in batch:

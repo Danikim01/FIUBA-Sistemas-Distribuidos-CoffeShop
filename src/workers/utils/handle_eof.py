@@ -3,7 +3,7 @@ import os
 import threading
 from contextlib import suppress
 from typing import Any, Dict, Optional
-from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata, extract_sequence_id
+from message_utils import ClientId, create_message_with_metadata, extract_data_and_client_id, extract_eof_metadata, extract_sequence_id, extract_message_uuid
 from middleware_config import MiddlewareConfig
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareQueue
 
@@ -45,18 +45,19 @@ class EOFHandler:
         """
         _, eof_data = extract_data_and_client_id(message)
         
-        # Extract sequence_id from the original message to propagate it
+        # Extract sequence_id and message_uuid from the original message to propagate them
         sequence_id = extract_sequence_id(message)
+        message_uuid = extract_message_uuid(message)
 
         counter = self.get_counter(eof_data)
 
         # if self.should_output(counter):
         #     logger.info(f"Worker {self.worker_id}: Outputting EOF for client {client_id} with counter {counter}")
-        #     self.output_eof(client_id=client_id, sequence_id=sequence_id)
+        #     self.output_eof(client_id=client_id, sequence_id=sequence_id, message_uuid=message_uuid)
         # else:
         #     logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
         #     self.requeue_eof(client_id=client_id, counter=counter, sequence_id=sequence_id)
-        self.output_eof(client_id=client_id, sequence_id=sequence_id)
+        self.output_eof(client_id=client_id, sequence_id=sequence_id, message_uuid=message_uuid)
 
     def handle_eof_with_routing_key(self, message: Dict[str, Any], client_id: ClientId, routing_key: str = "", exchange: str = ""):
         """Handle EOF message with specific routing key.
@@ -71,7 +72,7 @@ class EOFHandler:
         
         # Extract sequence_id from the original message to propagate it
         sequence_id = extract_sequence_id(message)
-
+        message_uuid = extract_message_uuid(message)
         counter = self.get_counter(eof_data)
 
         # if self.should_output(counter):
@@ -80,7 +81,7 @@ class EOFHandler:
         # else:
         #     logger.info(f"Worker {self.worker_id}: Requeuing EOF for client {client_id} with counter {counter}")
         #     self.requeue_eof(client_id=client_id, counter=counter, sequence_id=sequence_id)
-        self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange, sequence_id=sequence_id)
+        self.output_eof_with_routing_key(client_id=client_id, routing_key=routing_key, exchange=exchange, sequence_id=sequence_id, message_uuid=message_uuid)
 
     def get_counter(self, message: Dict[str, Any]) -> Counter:
         """Extract the counter from the EOF message.
@@ -110,7 +111,7 @@ class EOFHandler:
         #     return True
         return False
 
-    def output_eof(self, client_id: ClientId, sequence_id: Optional[str] = None):
+    def output_eof(self, client_id: ClientId, sequence_id: Optional[str] = None, message_uuid: Optional[str] = None):
         """Send EOF message to output with client metadata.
         
         Args:
@@ -121,11 +122,14 @@ class EOFHandler:
         if sequence_id:
             metadata['sequence_id'] = sequence_id
             logger.debug(f"[EOF-HANDLER] Propagating sequence_id in EOF: {sequence_id}")
+        if message_uuid:
+            metadata['message_uuid'] = message_uuid
+            logger.debug(f"[EOF-HANDLER] Propagating message_uuid in EOF: {message_uuid}")
         message = create_message_with_metadata(client_id, data=None, message_type='EOF', **metadata)
         publisher = self._get_output_publisher()
         publisher.send(message)
     
-    def output_eof_with_routing_key(self, client_id: ClientId, routing_key: str = "", exchange: str = "", sequence_id: Optional[str] = None):
+    def output_eof_with_routing_key(self, client_id: ClientId, routing_key: str = "", exchange: str = "", sequence_id: Optional[str] = None, message_uuid: Optional[str] = None):
         """Send EOF message to output with specific routing key.
         
         Args:
@@ -138,6 +142,9 @@ class EOFHandler:
         if sequence_id:
             metadata['sequence_id'] = sequence_id
             logger.debug(f"[EOF-HANDLER] Propagating sequence_id in EOF with routing_key: {sequence_id}")
+        if message_uuid:
+            metadata['message_uuid'] = message_uuid
+            logger.debug(f"[EOF-HANDLER] Propagating message_uuid in EOF with routing_key: {message_uuid}")
         message = create_message_with_metadata(client_id, data=None, message_type='EOF', **metadata)
         publisher = self._get_output_publisher()
         
@@ -146,7 +153,7 @@ class EOFHandler:
         
         try:
             publisher.send(message, routing_key=routing_key, exchange=exchange)
-            logger.info(f"[MESSAGE UTILS] Additional metadata: {message.get('counter', {})}")
+            #logger.info(f"[MESSAGE UTILS] Additional metadata: {message.get('counter', {})}")
         except Exception as exc:
             logger.error(f"Failed to send EOF with routing key {routing_key}: {exc}")
             raise

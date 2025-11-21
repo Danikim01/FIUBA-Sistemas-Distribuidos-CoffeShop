@@ -5,8 +5,8 @@ import logging
 from datetime import datetime
 from typing import Any, Union
 
-from filter_worker import FilterWorker
-from worker_utils import run_main
+from workers.filter.filter_worker import FilterWorker
+from workers.utils.worker_utils import run_main
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +29,7 @@ class YearFilterWorker(FilterWorker):
         super().__init__()
         self.min_year = int(os.getenv('MIN_YEAR', '2024'))
         self.max_year = int(os.getenv('MAX_YEAR', '2025'))
-        logger.info(f"TimeFilterWorker configured with time range: {self.min_year} - {self.max_year}")
+        logger.info(f"YearFilterWorker configured with time range: {self.min_year} - {self.max_year}")
 
     def apply_filter(self, item: Union[Transaction, TransactionItem]) -> bool:
         try:

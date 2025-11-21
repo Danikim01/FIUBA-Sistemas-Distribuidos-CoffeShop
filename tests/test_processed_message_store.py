@@ -488,6 +488,127 @@ class TestProcessedMessageStore:
             # Can mark second batch
             new_store.mark_processed(client_id, uuid2)
             assert new_store.has_processed(client_id, uuid2)
+    
+    def test_duplicate_detection_single_client(self, store, temp_dir):
+        """Test duplicate detection for a single client: UUID arrives, persists, same UUID arrives again."""
+        client_id = "test-client-duplicate-single"
+        uuid = "duplicate-uuid-1"
+        
+        # First arrival: UUID should not be processed
+        assert not store.has_processed(client_id, uuid), "UUID should not be processed initially"
+        
+        # Mark as processed (simulating first arrival and processing)
+        store.mark_processed(client_id, uuid)
+        assert store.has_processed(client_id, uuid), "UUID should be marked as processed after first mark"
+        
+        # Simulate restart to ensure persistence worked
+        with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
+            new_store = ProcessedMessageStore("test-worker")
+            # After restart, UUID should still be marked as processed
+            assert new_store.has_processed(client_id, uuid), "UUID should persist after restart"
+            
+            # Second arrival: Same UUID arrives again (duplicate)
+            # Should be detected as duplicate
+            assert new_store.has_processed(client_id, uuid), "Duplicate UUID should be detected"
+            
+            # Try to mark again (should be idempotent)
+            new_store.mark_processed(client_id, uuid)
+            assert new_store.has_processed(client_id, uuid), "UUID should still be marked after duplicate mark"
+    
+    def test_duplicate_detection_multiple_clients_concurrent(self, store):
+        """Test duplicate detection concurrently for multiple clients."""
+        num_clients = 10
+        num_rounds = 5
+        uuid_base = "concurrent-uuid"
+        
+        def process_client_rounds(client_id, round_num):
+            """Process a client through multiple rounds of duplicate detection."""
+            uuid = f"{uuid_base}-{client_id}-{round_num}"
+            
+            # First arrival: should not be processed
+            is_duplicate = store.has_processed(client_id, uuid)
+            if is_duplicate:
+                # If already processed, it's a duplicate
+                return True
+            
+            # Mark as processed
+            store.mark_processed(client_id, uuid)
+            
+            # Second arrival: should be detected as duplicate
+            is_duplicate_after = store.has_processed(client_id, uuid)
+            return is_duplicate_after
+        
+        def process_client(client_id):
+            """Process all rounds for a single client."""
+            results = []
+            for round_num in range(num_rounds):
+                result = process_client_rounds(client_id, round_num)
+                results.append(result)
+                time.sleep(0.001)  # Small delay to increase chance of race conditions
+            return results
+        
+        # Create threads for each client
+        threads = []
+        client_results = {}
+        
+        for client_id in range(num_clients):
+            client_id_str = f"client-{client_id}"
+            results = []
+            client_results[client_id_str] = results
+            
+            def client_worker(cid, res_list):
+                res = process_client(cid)
+                res_list.extend(res)
+            
+            t = threading.Thread(target=client_worker, args=(client_id_str, results))
+            threads.append(t)
+            t.start()
+        
+        # Wait for all threads to complete
+        for t in threads:
+            t.join()
+        
+        # Verify results: Each UUID should be detected as duplicate on second check
+        for client_id in range(num_clients):
+            client_id_str = f"client-{client_id}"
+            results = client_results[client_id_str]
+            
+            # Each round should have detected the duplicate (True on second check)
+            assert len(results) == num_rounds, f"Client {client_id_str} should have {num_rounds} results"
+            
+            # All results should be True (duplicate detected after marking)
+            for i, result in enumerate(results):
+                assert result, f"Client {client_id_str}, round {i}: duplicate should be detected after marking"
+            
+            # Verify all UUIDs are actually marked as processed
+            for round_num in range(num_rounds):
+                uuid = f"{uuid_base}-{client_id_str}-{round_num}"
+                assert store.has_processed(client_id_str, uuid), \
+                    f"UUID {uuid} for client {client_id_str} should be marked as processed"
+    
+    def test_duplicate_detection_with_restart(self, store, temp_dir):
+        """Test duplicate detection across worker restarts."""
+        client_id = "test-client-restart-duplicate"
+        uuid = "restart-uuid-1"
+        
+        # First worker: process UUID
+        assert not store.has_processed(client_id, uuid)
+        store.mark_processed(client_id, uuid)
+        assert store.has_processed(client_id, uuid)
+        
+        # Simulate worker restart
+        with patch.dict(os.environ, {'STATE_DIR': temp_dir}):
+            new_store = ProcessedMessageStore("test-worker")
+            
+            # After restart: UUID should still be marked (persisted)
+            assert new_store.has_processed(client_id, uuid), "UUID should persist after restart"
+            
+            # Duplicate arrives after restart: should be detected
+            assert new_store.has_processed(client_id, uuid), "Duplicate should be detected after restart"
+            
+            # Try to mark again: should be idempotent
+            new_store.mark_processed(client_id, uuid)
+            assert new_store.has_processed(client_id, uuid), "UUID should remain marked after duplicate mark"
 
 
 if __name__ == "__main__":

@@ -1,9 +1,8 @@
 import os
 import logging
-from filter_worker import FilterWorker
 from typing import Any, Union
-from worker_utils import run_main, safe_float_conversion
 from workers.filter.filter_worker import FilterWorker
+from workers.utils.worker_utils import run_main, safe_float_conversion
 from common.models import (
     Transaction,
     TransactionItem,

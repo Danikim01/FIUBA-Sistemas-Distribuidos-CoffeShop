@@ -70,8 +70,8 @@ def create_message_with_metadata(
         message['type'] = data['type']
         logger.debug("Inheriting message type from data: %s", data['type'])
 
-    if metadata:
-        logger.info(f"[MESSAGE UTILS] Additional metadata: {metadata}")
+    # if metadata:
+    #     logger.info(f"[MESSAGE UTILS] Additional metadata: {metadata}")
 
     message.update(metadata)
     return message
@@ -100,6 +100,18 @@ def extract_sequence_id(message: Dict[str, Any]) -> Optional[str]:
         sequence_id string if found, None otherwise
     """
     return message.get('sequence_id')
+
+
+def extract_message_uuid(message: Dict[str, Any]) -> Optional[str]:
+    """Extract message_uuid from message metadata.
+    
+    Args:
+        message: Message dictionary that may contain message_uuid in metadata
+        
+    Returns:
+        message_uuid string if found, None otherwise
+    """
+    return message.get('message_uuid')
 
 
 def extract_batch_num_from_sequence_id(sequence_id: str) -> Optional[int]:

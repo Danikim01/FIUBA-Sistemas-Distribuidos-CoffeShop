@@ -8,7 +8,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, TypeVar, Generic, Set
+from typing import Any, Dict, TypeVar, Generic
 
 from message_utils import ClientId
 
@@ -61,10 +61,7 @@ class StateManager(Generic[T]):
             self._state_dir = state_dir
         else:
             self._state_dir = Path(f"state/{worker_type}-{worker_id}")
-        
-        # Track modified clients to optimize persistence
-        self._modified_clients: Set[ClientId] = set()
-        
+                
         # Last processed message UUIDs (cached in memory, stored in client files)
         self._last_processed_message: Dict[ClientId, str] = {}
         
@@ -109,27 +106,8 @@ class StateManager(Generic[T]):
     
     def _load_state(self) -> None:
         """Load state from disk - loads client states and UUIDs from client files."""
-        # Load client states (UUIDs are loaded from client files, not a separate metadata file)
-        # For now, we'll load all client states on startup
-        # In production, you might want to implement lazy loading
         self._load_all_client_states()
-    
-    def _load_metadata(self) -> None:
-        """
-        Load metadata (message UUIDs) from client files.
         
-        This method is called during _load_all_client_states() to extract UUIDs
-        from client files. UUIDs are no longer stored in a separate metadata file
-        to ensure atomicity - if the worker crashes after persisting a client state,
-        the UUID is still available in the client file.
-        
-        Note: This method is kept for backwards compatibility but UUIDs are now
-        loaded directly from client files in _load_all_client_states().
-        """
-        # UUIDs are now loaded from client files, not a separate metadata file
-        # This method is kept for backwards compatibility but does nothing
-        pass
-    
     def _load_all_client_states(self) -> None:
         """
         Load all client states from disk.
@@ -356,7 +334,7 @@ class StateManager(Generic[T]):
             # Replace original with validated temp file (atomic operation)
             os.replace(temp_path, client_path)
             
-            logger.debug("[PERSIST-CLIENT] Persisted state for client %s", client_id)
+            #logger.debug("[PERSIST-CLIENT] Persisted state for client %s", client_id)
             
         except Exception as exc:
             logger.error("[PERSIST-CLIENT] [ERROR] Failed to persist state for client %s: %s", 
@@ -365,23 +343,7 @@ class StateManager(Generic[T]):
             with contextlib.suppress(FileNotFoundError):
                 temp_path.unlink()
             raise
-    
-    def _persist_metadata(self) -> None:
-        """
-        Persist metadata (message UUIDs).
-        
-        NOTE: This method is now a no-op. UUIDs are stored directly in client files
-        to ensure atomicity. If the worker crashes after persisting a client state,
-        the UUID is still available in the client file for duplicate detection.
-        """
-        # UUIDs are now stored directly in client files, not in a separate metadata file
-        # This method is kept for backwards compatibility but does nothing
-        pass
-    
-    def mark_client_modified(self, client_id: ClientId) -> None:
-        """Mark a client as modified so it will be persisted."""
-        self._modified_clients.add(client_id)
-    
+            
     def get_last_processed_message(self, client_id: ClientId) -> str | None:
         """
         Get the last processed message UUID for a client.
@@ -395,7 +357,7 @@ class StateManager(Generic[T]):
         # First check cache (fast path)
         uuid = self._last_processed_message.get(client_id)
         if uuid:
-            logger.debug("[GET-UUID] Found UUID %s for client %s in memory cache", uuid, client_id)
+            logger.info(f"\033[32m[GET-UUID] Found UUID {uuid} for client {client_id} in memory cache\033[0m")
             return uuid
         
         # Read from client file (source of truth)
@@ -408,23 +370,20 @@ class StateManager(Generic[T]):
                 if file_uuid:
                     # Update cache for next time
                     self._last_processed_message[client_id] = file_uuid
-                    logger.debug("[GET-UUID] Found UUID %s for client %s in client file", 
-                               file_uuid, client_id)
+                    logger.info(f"\033[32m[GET-UUID] Found UUID {file_uuid} for client {client_id} in client file\033[0m")
                     return file_uuid
             except Exception as exc:
-                logger.debug("[GET-UUID] Failed to read UUID from client file %s: %s", client_path, exc)
+                logger.info(f"\033[33m[GET-UUID] Failed to read UUID from client file {client_path}: {exc}\033[0m")
         
         return None
     
     def set_last_processed_message(self, client_id: ClientId, message_uuid: str) -> None:
         """Set the last processed message UUID for a client."""
         self._last_processed_message[client_id] = message_uuid
-        self.mark_client_modified(client_id)
     
     def clear_last_processed_message(self, client_id: ClientId) -> None:
         """Clear the last processed message UUID for a client."""
         self._last_processed_message.pop(client_id, None)
-        self.mark_client_modified(client_id)
     
     def drop_empty_client_state(self, client_id: ClientId) -> None:
         """
