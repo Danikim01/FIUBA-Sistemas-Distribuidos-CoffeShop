@@ -111,7 +111,7 @@ class ShardingRouter(BaseWorker):
                 client_id,
                 batch,
                 routing_key=routing_key,
-                message_uuid=str(uuid.uuid4()),
+                # message_uuid=str(uuid.uuid4()),
             )
             
             # Clear batch

@@ -31,7 +31,7 @@ class FilterWorker(BaseWorker):
         super().__init__()
         worker_label = f"{self.__class__.__name__}-{os.getenv('WORKER_ID', '0')}"
 
-        self._processed_store = ProcessedMessageStore(worker_label)  
+        #self._processed_store = ProcessedMessageStore(worker_label)  
 
 
     @abstractmethod
@@ -46,34 +46,34 @@ class FilterWorker(BaseWorker):
         """
         raise NotImplementedError
 
-    def _get_current_message_uuid(self) -> str | None:
-        """Get the message UUID from the current message metadata."""
-        metadata = self._get_current_message_metadata()
-        if not metadata:
-            return None
-        message_uuid = metadata.get("message_uuid")
-        if not message_uuid:
-            return None
-        return str(message_uuid)
+    # def _get_current_message_uuid(self) -> str | None:
+    #     """Get the message UUID from the current message metadata."""
+    #     metadata = self._get_current_message_metadata()
+    #     if not metadata:
+    #         return None
+    #     message_uuid = metadata.get("message_uuid")
+    #     if not message_uuid:
+    #         return None
+    #     return str(message_uuid)
 
-    def _check_duplicate(self, client_id: str) -> Tuple[bool, str | None]:
-        """Check if the current message is a duplicate.
+    # def _check_duplicate(self, client_id: str) -> Tuple[bool, str | None]:
+    #     """Check if the current message is a duplicate.
         
-        Returns:
-            Tuple of (is_duplicate, message_uuid)
-        """
-        message_uuid = self._get_current_message_uuid()
-        if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
-            logger.info(
-                f"\033[33m[FILTER] Duplicate message {message_uuid} for client {client_id} detected; skipping processing\033[0m"
-            )
-            return True, message_uuid
-        return False, message_uuid
+    #     Returns:
+    #         Tuple of (is_duplicate, message_uuid)
+    #     """
+    #     message_uuid = self._get_current_message_uuid()
+    #     if message_uuid and self._processed_store.has_processed(client_id, message_uuid):
+    #         logger.info(
+    #             f"\033[33m[FILTER] Duplicate message {message_uuid} for client {client_id} detected; skipping processing\033[0m"
+    #         )
+    #         return True, message_uuid
+    #     return False, message_uuid
 
-    def _mark_processed(self, client_id: str, message_uuid: str | None) -> None:
-        """Mark a message as processed."""
-        if message_uuid:
-            self._processed_store.mark_processed(client_id, message_uuid)
+    # def _mark_processed(self, client_id: str, message_uuid: str | None) -> None:
+    #     """Mark a message as processed."""
+    #     if message_uuid:
+    #         self._processed_store.mark_processed(client_id, message_uuid)
 
     def process_batch(self, batch: List[Union[Transaction, TransactionItem]], client_id: str):
         """Process a batch by filtering and sending filtered results.
@@ -83,16 +83,16 @@ class FilterWorker(BaseWorker):
             client_id: Client identifier
         """
         # Check for duplicates
-        duplicate, message_uuid = self._check_duplicate(client_id)
-        if duplicate:
-            return
+        # duplicate, message_uuid = self._check_duplicate(client_id)
+        # if duplicate:
+        #     return
 
-        try:
-            filtered_items = [item for item in batch if self.apply_filter(item)]
-            if filtered_items:
-                self.send_message(client_id=client_id, data=filtered_items)
-        finally:
-            self._mark_processed(client_id, message_uuid)
+        #try:
+        filtered_items = [item for item in batch if self.apply_filter(item)]
+        if filtered_items:
+            self.send_message(client_id=client_id, data=filtered_items)
+        # finally:
+        #     self._mark_processed(client_id, message_uuid)
 
     def handle_eof(self, message: EOFMessage, client_id: str):
         """
