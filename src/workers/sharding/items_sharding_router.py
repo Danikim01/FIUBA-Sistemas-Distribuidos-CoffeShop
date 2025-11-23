@@ -3,11 +3,8 @@
 """Items Sharding router that distributes transaction items to Items workers based on item_id."""
 
 import logging
-import os
-from typing import Any
 from workers.utils.worker_utils import run_main
 from workers.sharding.sharding_router import ShardingRouter
-from workers.utils.sharding_utils import get_routing_key_for_item, extract_item_id_from_payload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,28 +19,8 @@ class ItemsShardingRouter(ShardingRouter):
     """
     
     def __init__(self):
-        super().__init__()
-        logger.info("ItemsShardingRouter initialized - inheriting all functionality from ShardingRouter")
-
-    def process_message(self, message: Any, client_id: str) -> None:
-        """
-        Process incoming transaction item and add it to appropriate shard batch.
-        
-        Args:
-            message: Transaction item data
-            client_id: Client identifier
-        """
-        # Extract item_id from the transaction item
-        item_id = extract_item_id_from_payload(message)
-        if item_id is None:
-            logger.warning(f"Transaction item without item_id, skipping. Message keys: {list(message.keys()) if isinstance(message, dict) else 'Not a dict'}")
-            return
-            
-        # Calculate routing key for this item_id
-        routing_key = get_routing_key_for_item(item_id, self.num_shards)
-        
-        # Add message to batch
-        self._add_to_batch(client_id, routing_key, message)
+        super().__init__(routing_field="item_id")
+        logger.info("ItemsShardingRouter initialized - routing by item_id using base ShardingRouter")
 
 
 if __name__ == '__main__':

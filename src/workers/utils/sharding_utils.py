@@ -23,7 +23,7 @@ def get_shard_id(store_id: Union[str, int], num_shards: int) -> int:
     return hash_value % num_shards
 
 
-def get_routing_key(store_id: Union[str, int], num_shards: int) -> str:
+def get_routing_key_by_store_id(store_id: Union[str, int], num_shards: int) -> str:
     """
     Generate routing key for sharding based on store_id.
     
@@ -38,7 +38,7 @@ def get_routing_key(store_id: Union[str, int], num_shards: int) -> str:
     return f"shard_{shard_id}"
 
 
-def get_routing_key_for_item(item_id: Union[str, int], num_shards: int) -> str:
+def get_routing_key_by_item_id(item_id: Union[str, int], num_shards: int) -> str:
     """
     Generate routing key for sharding based on item_id.
     

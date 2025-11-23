@@ -11,7 +11,7 @@ from typing import Any, DefaultDict, Dict, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion # pyright: ignore[reportMissingImports]
 from workers.local_top_scaling.aggregator_worker import AggregatorWorker
-from workers.utils.sharding_utils import get_routing_key, extract_store_id_from_payload
+from workers.utils.sharding_utils import get_routing_key_by_store_id, extract_store_id_from_payload
 from workers.state_manager.users_state_manager import UsersStateManager
 
 logging.basicConfig(level=logging.INFO)
@@ -92,7 +92,7 @@ class ShardedClientsWorker(AggregatorWorker):
             return False
             
         # For regular transactions, verify they belong to our shard
-        expected_routing_key = get_routing_key(store_id, self.num_shards)
+        expected_routing_key = get_routing_key_by_store_id(store_id, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
             logger.warning(f"Received transaction for wrong shard: store_id={store_id}, expected={self.expected_routing_key}, got={expected_routing_key}")
             return False

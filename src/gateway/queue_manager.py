@@ -10,8 +10,8 @@ from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQM
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
 from config import GatewayConfig
 from workers.utils.sharding_utils import (
-    get_routing_key,
-    get_routing_key_for_item,
+    get_routing_key_by_store_id,
+    get_routing_key_by_item_id,
     extract_store_id_from_payload,
     extract_item_id_from_payload
 )
@@ -225,7 +225,7 @@ class QueueManager:
                     if isinstance(transaction, dict):
                         store_id = extract_store_id_from_payload(transaction)
                         if store_id is not None:
-                            routing_key = get_routing_key(store_id, replica_count)
+                            routing_key = get_routing_key_by_store_id(store_id, replica_count)
                             if routing_key not in sharded_chunks:
                                 sharded_chunks[routing_key] = []
                             sharded_chunks[routing_key].append(transaction)
@@ -329,7 +329,7 @@ class QueueManager:
                     if isinstance(item, dict):
                         item_id = extract_item_id_from_payload(item)
                         if item_id is not None:
-                            routing_key = get_routing_key_for_item(item_id, replica_count)
+                            routing_key = get_routing_key_by_item_id(item_id, replica_count)
                             if routing_key not in sharded_chunks:
                                 sharded_chunks[routing_key] = []
                             sharded_chunks[routing_key].append(item)

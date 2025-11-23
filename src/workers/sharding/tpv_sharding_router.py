@@ -19,8 +19,8 @@ class TPVShardingRouter(ShardingRouter):
     """
     
     def __init__(self):
-        super().__init__()
-        logger.info("TPVShardingRouter initialized - inheriting all functionality from ShardingRouter")
+        super().__init__(routing_field="store_id")
+        logger.info("TPVShardingRouter initialized - routing by store_id using base ShardingRouter")
 
 
 if __name__ == '__main__':
