@@ -9,8 +9,8 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
-from workers.extra_source.menu_items import MenuItemsExtraSource
-from workers.local_top_scaling.aggregator_worker import AggregatorWorker
+from workers.metadata_store.menu_items import MenuItemsMetadataStore
+from workers.sharded_process.process_worker import ProcessWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def _new_quantity_totals() -> QuantityTotals:
 def _new_profit_totals() -> ProfitTotals:
     return defaultdict(_new_profit_bucket)
 
-class FinalItemsAggregator(AggregatorWorker):
+class TopItemsAggregator(ProcessWorker):
     """Aggregates per-client quantity and profit rankings across replicas."""
 
     def __init__(self) -> None:
@@ -48,7 +48,7 @@ class FinalItemsAggregator(AggregatorWorker):
         self._profit_totals: DefaultDict[ClientId, ProfitTotals]
         self._profit_totals = defaultdict(_new_profit_totals)
 
-        self.menu_items_source = MenuItemsExtraSource(self.middleware_config)
+        self.menu_items_source = MenuItemsMetadataStore(self.middleware_config)
         self.menu_items_source.start_consuming()
 
         # Track how many EOFs we've received from sharded workers per client
@@ -109,7 +109,7 @@ class FinalItemsAggregator(AggregatorWorker):
                     continue
                 ym_bucket[iid] += profit
 
-    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+    def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         self._merge_quantity_totals_map(client_id, payload.get('quantity'))
         self._merge_profit_totals_map(client_id, payload.get('profit'))
 
@@ -237,4 +237,4 @@ class FinalItemsAggregator(AggregatorWorker):
 
 
 if __name__ == "__main__":
-    run_main(FinalItemsAggregator)
+    run_main(TopItemsAggregator)

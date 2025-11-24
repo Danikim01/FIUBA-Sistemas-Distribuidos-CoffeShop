@@ -9,16 +9,16 @@ from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_int_conversion # pyright: ignore[reportMissingImports]
-from workers.local_top_scaling.aggregator_worker import AggregatorWorker
-from workers.extra_source.users import UsersExtraSource
-from workers.extra_source.stores import StoresExtraSource
+from workers.sharded_process.process_worker import ProcessWorker
+from workers.metadata_store.users import UsersMetadataStore
+from workers.metadata_store.stores import StoresMetadataStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Birthday date of the 3 customers who have made the most purchases for each branch
 
-class TopClientsBirthdaysAggregator(AggregatorWorker):
+class TopClientsAggregator(ProcessWorker):
     """Aggregates top-client partials and injects client birthdays."""
 
     def __init__(self) -> None:
@@ -27,9 +27,9 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         
         self.top_n = safe_int_conversion(os.getenv('TOP_USERS_COUNT'), default=3)
 
-        self.stores_source = StoresExtraSource(self.middleware_config)
+        self.stores_source = StoresMetadataStore(self.middleware_config)
         self.stores_source.start_consuming()
-        self.birthdays_source = UsersExtraSource(self.middleware_config)
+        self.birthdays_source = UsersMetadataStore(self.middleware_config)
         self.birthdays_source.start_consuming()
         
         self.recieved_payloads: Dict[ClientId, list[dict[str, Any]]] = {}
@@ -51,7 +51,7 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
         self.stores_source.reset_state(client_id)
         self.birthdays_source.reset_state(client_id)
     
-    def accumulate_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
+    def process_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
         self.recieved_payloads.setdefault(client_id, []).append(payload)
 
     def create_payload(self, client_id: ClientId) -> list[Dict[str, Any]]:
@@ -198,4 +198,4 @@ class TopClientsBirthdaysAggregator(AggregatorWorker):
 
 
 if __name__ == '__main__':
-    run_main(TopClientsBirthdaysAggregator)
+    run_main(TopClientsAggregator)

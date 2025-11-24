@@ -4,7 +4,7 @@
 
 import logging
 from workers.utils.worker_utils import run_main
-from workers.sharding.sharding_router import ShardingRouter
+from workers.router.sharding_router import ShardingRouter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

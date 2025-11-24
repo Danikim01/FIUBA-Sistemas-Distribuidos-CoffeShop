@@ -121,14 +121,6 @@
         "REPLICA_COUNT": "3"
       }
     },
-    "tpv": {
-      "count": 3,
-      "environment": {
-        "INPUT_EXCHANGE": "transactions_time_filtered",
-        "INPUT_QUEUE": "transactions_time_filtered_tpv",
-        "OUTPUT_QUEUE": "tpv_partial"
-      }
-    },
     "tpv_sharding_router": {
       "environment": {
         "INPUT_EXCHANGE": "transactions_time_filtered",
@@ -144,20 +136,13 @@
         "OUTPUT_QUEUE": "tpv_partial"
       }
     },
-    "items_top": {
-      "count": 3,
-      "environment": {
-        "INPUT_QUEUE": "transaction_items_year_filtered",
-        "OUTPUT_QUEUE": "top_items_partial"
-      }
-    },
-    "items_sharding_router": {
+    "top_items_sharding_router": {
       "environment": {
         "INPUT_QUEUE": "transaction_items_year_filtered",
         "OUTPUT_EXCHANGE": "transaction_items_year_filtered_sharded"
       }
     },
-    "items_sharded": {
+    "top_items_sharded": {
       "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transaction_items_year_filtered_sharded",
@@ -172,7 +157,7 @@
         "OUTPUT_EXCHANGE": "transactions_year_filtered_sharded"
       }
     },
-    "top_clients": {
+    "top_clients_sharded": {
       "count": 3,
       "environment": {
         "INPUT_EXCHANGE": "transactions_year_filtered_sharded",
@@ -180,7 +165,7 @@
         "OUTPUT_QUEUE": "top_clients_partial"
       }
     },
-    "items_aggregator": {
+    "top_items_aggregator": {
       "environment": {
         "INPUT_QUEUE": "top_items_partial",
         "OUTPUT_QUEUE": "gateway_results"
@@ -192,7 +177,7 @@
         "OUTPUT_QUEUE": "gateway_results"
       }
     },
-    "top_clients_birthdays": {
+    "top_clients_aggregator": {
       "environment": {
         "INPUT_QUEUE": "top_clients_partial",
         "OUTPUT_QUEUE": "gateway_results"

@@ -3,7 +3,7 @@ from typing import Dict
 
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.extra_source.extra_source import ExtraSource
+from workers.metadata_store.metadata_store import MetadataStore
 
 UserId = str
 Birthday = str
@@ -11,7 +11,7 @@ Birthday = str
 id_column = "user_id"
 birthday_column = "birthdate"
 
-class UsersExtraSource(ExtraSource):
+class UsersMetadataStore(MetadataStore):
     """Stores {user_id: birthdate} per client, backed by JSON on disk."""
 
     def __init__(self, middleware_config: MiddlewareConfig):

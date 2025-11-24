@@ -15,8 +15,8 @@ StateDict = Dict[str, Any]
 T = TypeVar("T")
 
 
-class AggregatorWorker(BaseWorker):
-    """Base class for single-source top workers with per-client state helpers."""
+class ProcessWorker(BaseWorker):
+    """Base class for workers that process data (more than just forwarding it)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -25,7 +25,7 @@ class AggregatorWorker(BaseWorker):
         self._state_lock = threading.RLock()
 
     @abstractmethod
-    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+    def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
         pass
 
@@ -55,12 +55,11 @@ class AggregatorWorker(BaseWorker):
             get_payload_len(payload),
             client_id
         )
-
     
     def process_batch(self, batch: list, client_id: ClientId):
         with self._state_lock:
             for entry in batch:
-                self.accumulate_transaction(client_id, entry)
+                self.process_transaction(client_id, entry)
 
     @staticmethod
     def _chunk_payload(payload: list[Dict[str, Any]], chunk_size: int) -> list[list[Dict[str, Any]]]:

@@ -3,7 +3,7 @@ import os
 from typing import Any
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.extra_source.extra_source import ExtraSource
+from workers.metadata_store.metadata_store import MetadataStore
 
 logger = logging.getLogger(__name__)
 
@@ -13,9 +13,9 @@ name_column = 'item_name'
 ItemId = str
 ItemName = str
     
-class MenuItemsExtraSource(ExtraSource):
+class MenuItemsMetadataStore(MetadataStore):
     def __init__(self, middleware_config: MiddlewareConfig):
-        """Initialize an extra source for the worker.
+        """Initialize a menu items metadata store for the worker.
         
         Args:
         """ 

@@ -29,7 +29,7 @@ if str(WORKERS_PATH) not in sys.path:
 if str(UTILS_PATH) not in sys.path:
     sys.path.insert(0, str(UTILS_PATH))
 
-from workers.state_manager.tpv_state_manager import TPVStateManager
+from workers.state_manager.tpv import TPVStateManager
 from message_utils import ClientId
 
 # Test directory
@@ -72,10 +72,8 @@ def test_basic_persistence():
     
     # Verify files exist
     client_file = TEST_STATE_DIR / "client_client-001.json"
-    metadata_file = TEST_STATE_DIR / "metadata.json"
     
     assert client_file.exists(), "Client state file should exist"
-    assert metadata_file.exists(), "Metadata file should exist"
     
     # Create new state manager and load
     state_manager2 = TPVStateManager(

@@ -10,9 +10,9 @@ from typing import Any, DefaultDict, Dict, List, Optional
 
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
 from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_month # pyright: ignore[reportMissingImports]
-from workers.local_top_scaling.aggregator_worker import AggregatorWorker
+from workers.sharded_process.process_worker import ProcessWorker
 from workers.utils.sharding_utils import get_routing_key_by_item_id, extract_item_id_from_payload
-from workers.state_manager.items_state_manager import ItemsStateManager
+from workers.state_manager.items import ItemsStateManager
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ def _new_monthly_quantity_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, in
 def _new_monthly_profit_map() -> DefaultDict[YearMonth, DefaultDict[ItemId, float]]:
     return defaultdict(_new_profit_bucket)
 
-class ShardedItemsWorker(AggregatorWorker):
+class ShardedItemsWorker(ProcessWorker):
     """
     Sharded version of ItemsWorker that processes transaction items based on item_id sharding.
     Each worker processes a specific shard of items (item_id 1-8 distributed across shards).
@@ -118,7 +118,7 @@ class ShardedItemsWorker(AggregatorWorker):
             
         return True
 
-    def accumulate_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
+    def process_transaction(self, client_id: str, payload: Dict[str, Any]) -> None:
         # Only process transaction items that belong to this worker's shard
         if not self.should_process_transaction(payload):
             return
@@ -126,7 +126,7 @@ class ShardedItemsWorker(AggregatorWorker):
         # Skip control messages (EOF, etc.) - they don't have item_id
         item_id = extract_item_id_from_payload(payload)
         if item_id is None:
-            logger.debug(f"Skipping control message in accumulate_transaction: {payload}")
+            logger.debug(f"Skipping control message in process_transaction: {payload}")
             return
             
         year_month = extract_year_month(payload.get('created_at'))
@@ -222,7 +222,7 @@ class ShardedItemsWorker(AggregatorWorker):
                         logger.info("[PROCESSING - BATCH] [INTERRUPT] Shutdown requested during batch processing, rolling back")
                         raise InterruptedError("Shutdown requested during batch processing")
 
-                    self.accumulate_transaction(client_id, entry)
+                    self.process_transaction(client_id, entry)
 
                 logger.info(f"All {len(batch)} transactions accumulated successfully")
 

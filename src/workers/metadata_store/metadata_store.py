@@ -4,17 +4,17 @@ import threading
 from typing import Any
 from message_utils import ClientId, extract_data_and_client_id, is_eof_message
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
-from workers.extra_source.done import Done
+from workers.metadata_store.done import Done
 
 logger = logging.getLogger(__name__)
 
-class ExtraSource(ABC):
+class MetadataStore(ABC):
     def __init__(self, name: str, middleware: RabbitMQMiddlewareQueue | RabbitMQMiddlewareExchange ):
-        """Initialize an extra source for the worker.
+        """Initialize an metadata store for the worker.
         
         Args:
-            name: Name of the extra source
-            queue: Queue name for the extra source (optional)
+            name: Name of the metadata
+            queue: Queue name for the metadata (optional)
         """
         self.name = name
         self.middleware = middleware
@@ -29,7 +29,7 @@ class ExtraSource(ABC):
             self.consuming_thread.join(timeout=10.0)
 
     def _start_consuming(self):
-        """Start consuming messages from the extra source."""
+        """Start consuming messages from the metadata queue."""
 
         def on_message(message):
             try:
@@ -82,7 +82,7 @@ class ExtraSource(ABC):
 
     @abstractmethod
     def save_data(self, data: dict):
-        """Handle and persist a message from the extra source.
+        """Handle and persist a message from the metadata queue.
         
         Args:
             message: The message to handle
@@ -91,7 +91,7 @@ class ExtraSource(ABC):
     
     @abstractmethod
     def save_batch(self, data: list):
-        """Handle and persist a batch of messages from the extra source.
+        """Handle and persist a batch of messages from the metadata queue.
 
         Args:
             message: The message to handle
@@ -113,7 +113,7 @@ class ExtraSource(ABC):
     ) -> str:
         if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
             logger.warning(
-                "Timed out waiting for extra source %s to finish for client %s before retrieving %s",
+                "Timed out waiting for metadata queue %s to finish for client %s before retrieving %s",
                 self.name,
                 client_id,
                 item_id,

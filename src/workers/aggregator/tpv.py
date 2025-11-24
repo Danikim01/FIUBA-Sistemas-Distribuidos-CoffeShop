@@ -4,9 +4,9 @@ import os
 import threading
 from typing import Any, DefaultDict, Dict, List, Optional
 from message_utils import ClientId # pyright: ignore[reportMissingImports]
-from workers.local_top_scaling.aggregator_worker import AggregatorWorker
-from workers.local_top_scaling.tpv_sharded import StoreId, YearHalf
-from workers.extra_source.stores import StoresExtraSource
+from workers.sharded_process.process_worker import ProcessWorker
+from workers.sharded_process.tpv import StoreId, YearHalf
+from workers.metadata_store.stores import StoresMetadataStore
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
 
 logging.basicConfig(level=logging.INFO)
@@ -14,12 +14,12 @@ logger = logging.getLogger(__name__)
 
 # TPV (Total Payment Value) per each semester during 2024 and 2025, per branch, created between 06:00 AM and 11:00 PM.
 
-class TPVAggregator(AggregatorWorker): 
+class TPVAggregator(ProcessWorker): 
     def __init__(self) -> None:
         super().__init__()
         self.chunk_payload = False
         
-        self.stores_source = StoresExtraSource(self.middleware_config)
+        self.stores_source = StoresMetadataStore(self.middleware_config)
         self.stores_source.start_consuming()
         
         self.recieved_payloads: DefaultDict[
@@ -42,7 +42,7 @@ class TPVAggregator(AggregatorWorker):
             pass
         self.stores_source.reset_state(client_id)
 
-    def accumulate_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
+    def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
         store_id: StoreId = safe_int_conversion(payload.get("store_id"), minimum=0)
         year_half: YearHalf = payload.get("year_half_created_at", "Unknown")

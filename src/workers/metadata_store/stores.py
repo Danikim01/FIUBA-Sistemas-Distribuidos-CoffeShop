@@ -2,16 +2,16 @@ import logging
 import os
 from message_utils import ClientId
 from middleware_config import MiddlewareConfig
-from workers.extra_source.extra_source import ExtraSource
+from workers.metadata_store.metadata_store import MetadataStore
 
 logger = logging.getLogger(__name__)
 
 StoreId = str
 StoreName = str
     
-class StoresExtraSource(ExtraSource):
+class StoresMetadataStore(MetadataStore):
     def __init__(self, middleware_config: MiddlewareConfig):
-        """Initialize an extra source for the worker.
+        """Initialize a stores metadata store for the worker.
         
         Args:
         """ 
