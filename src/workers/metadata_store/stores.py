@@ -30,8 +30,8 @@ class StoresMetadataStore(MetadataStore):
             value_key='store_name'
         )
 
-    def reset_state(self, client_id: ClientId):
-        """Reset the internal state of the metadata store."""
+    def _reset_metadata_state(self, client_id: ClientId):
+        """Reset the metadata-specific state (data and persistence)."""
         self.data.pop(client_id, None)
         self._persistence.clear_client(client_id)
     

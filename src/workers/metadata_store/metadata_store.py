@@ -19,7 +19,7 @@ class MetadataStore(ABC):
         self.name = name
         self.middleware = middleware
         self.current_client_id = ''
-        self.clients_done = Done()
+        self.clients_done = Done(name)
         self.consuming_thread = threading.Thread(target=self._start_consuming, daemon=True)
         
     def close(self):
@@ -102,8 +102,20 @@ class MetadataStore(ABC):
     def _get_item(self, client_id: ClientId, item_id: str) -> str:
         raise NotImplementedError
     
-    @abstractmethod
     def reset_state(self, client_id: ClientId):
+        """Reset the internal state of the metadata store, including Done state."""
+        # Limpiar el estado Done para este cliente
+        self.clients_done.clear_client(client_id)
+        # Llamar al método abstracto para limpiar la metadata específica
+        self._reset_metadata_state(client_id)
+    
+    @abstractmethod
+    def _reset_metadata_state(self, client_id: ClientId):
+        """Reset the metadata-specific state (data and persistence).
+        
+        This method should be implemented by subclasses to clear their specific
+        metadata (data cache and persistence store).
+        """
         raise NotImplementedError
 
     def get_item_when_done(
@@ -132,8 +144,8 @@ class MetadataStore(ABC):
             # El consumo no ha terminado, esperar con timeout
             if not self.clients_done.is_client_done(client_id, block=True, timeout=10.0):
                 logger.warning(
-                    "Timed out waiting for metadata queue %s to finish for client %s before retrieving %s. "
-                    "Item may not be available yet.",
+                    "\033[1;38;5;202mTimed out waiting for metadata queue %s to finish for client %s before retrieving %s. "
+                    "Item may not be available yet.\033[0m",
                     self.name,
                     client_id,
                     item_id,

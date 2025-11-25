@@ -43,26 +43,14 @@ class TPVAggregator(ProcessWorker):
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         self._load_persisted_state()
         
-        # Track how many EOFs we've received from sharded workers per client
-        # Load persisted EOF counters on startup
-        self.eof_count_per_client: Dict[ClientId, int] = {}
-        self._load_persisted_eof_counters()
-        
-        self.eof_count_lock = threading.Lock()
     
     def _load_persisted_state(self) -> None:
         """Load persisted aggregation state for all clients on startup."""
         logger.info("[TPV-AGGREGATOR] Loading persisted aggregation state...")
         
-        # Restore recieved_payloads from persisted state
-        # BUT: Only restore if the client hasn't completed yet (EOF count < expected)
         for client_id in list(self.state_store._cache.keys()):
-            # Check if client already completed (should not restore state if completed)
             eof_count = self.eof_counter_store.get_counter(client_id)
             if eof_count >= self.expected_eof_count:
-                # Client already completed, don't restore state
-                # BUT: Don't clean up yet - we need to keep EOF UUIDs for deduplication
-                # The state will be cleaned up when we actually process and send results
                 logger.info(
                     f"[TPV-AGGREGATOR] Client {client_id} already completed "
                     f"(EOF count: {eof_count}), skipping state restoration "
@@ -101,8 +89,6 @@ class TPVAggregator(ProcessWorker):
         # Clear processed messages and aggregation state
         self.processed_messages.clear_client(client_id)
         self.state_store.clear_client(client_id)
-        # NOTE: We DON'T clear eof_counter_store here to keep UUIDs for deduplication
-        # The EOF counter will be cleared when the client disconnects or after a timeout
 
     def process_transaction(self, client_id: ClientId, payload: Dict[str, Any]) -> None:
         """Accumulate data from a single transaction payload."""
@@ -139,7 +125,6 @@ class TPVAggregator(ProcessWorker):
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
-        # Convert nested defaultdicts to regular dicts for JSON serialization
         payloads_data = {}
         for year_half, stores in self.recieved_payloads.get(client_id, {}).items():
             payloads_data[year_half] = {str(k): v for k, v in stores.items()}
@@ -153,7 +138,6 @@ class TPVAggregator(ProcessWorker):
         return self.stores_source.get_item_when_done(client_id, str(store_id))
 
     def create_payload(self, client_id: ClientId) -> List[Dict[str, Any]]:
-        # Inject store names into the payload
         client_payloads = self.recieved_payloads.pop(client_id, {})
         results: List[Dict[str, Any]] = []
 
@@ -202,10 +186,8 @@ class TPVAggregator(ProcessWorker):
             )
             return
         
-        # Check if client already completed (before processing this EOF)
         current_eof_count = self.eof_counter_store.get_counter(client_id)
         if current_eof_count >= self.expected_eof_count:
-            # Client already completed, ignore this EOF (may be a duplicate or retry)
             logger.info(
                 f"[TPV-AGGREGATOR] [ALREADY-COMPLETED] Ignoring EOF for client {client_id} "
                 f"(already completed with {current_eof_count} EOFs). "
@@ -223,9 +205,7 @@ class TPVAggregator(ProcessWorker):
             self.eof_counter_store.mark_processed(client_id, message_uuid)
         
         # Increment EOF counter for this client (persisted)
-        with self.eof_count_lock:
-            eof_count = self.eof_counter_store.increment_counter(client_id)
-            self.eof_count_per_client[client_id] = eof_count
+        eof_count = self.eof_counter_store.increment_counter(client_id)
         
         logger.info(
             f"[TPV-AGGREGATOR] EOF count for client {client_id}: {eof_count}/{self.expected_eof_count}"
@@ -233,8 +213,6 @@ class TPVAggregator(ProcessWorker):
         
         with self._pause_message_processing():
             if eof_count >= self.expected_eof_count:
-                # We've received EOFs from all sharded workers
-                # Now send the final aggregated results
                 logger.info(
                     f"[TPV-AGGREGATOR] All EOFs received for client {client_id} "
                     f"({eof_count}/{self.expected_eof_count}). "
@@ -254,10 +232,6 @@ class TPVAggregator(ProcessWorker):
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
                 
-                # Clean up EOF counter for this client (but keep processed UUIDs in memory for a bit)
-                with self.eof_count_lock:
-                    if client_id in self.eof_count_per_client:
-                        del self.eof_count_per_client[client_id]
             else:
                 # Not all EOFs received yet, just discard this EOF
                 # (we don't need requeue since each sharded worker sends its own EOF)

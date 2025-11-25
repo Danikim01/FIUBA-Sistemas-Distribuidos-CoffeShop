@@ -21,12 +21,6 @@ class MetadataPersistenceStore:
     
     Cada cliente tiene un archivo CSV con formato: id,value
     Nuevos items se agregan con append + fsync para durabilidad.
-    
-    Esto asegura:
-    - Escrituras rápidas (append-only CSV, más rápido que JSON)
-    - Atomicidad (fsync después de cada append o batch)
-    - Recuperación tras crash (items persisten antes de completar procesamiento)
-    - Eficiencia para datasets grandes (users: 2M items)
     """
     
     def __init__(self, store_type: str, id_key: str, value_key: str):
@@ -92,7 +86,7 @@ class MetadataPersistenceStore:
                     unique_count = len(data)
                     # Log with full client_id (no truncation)
                     logger.info(
-                        "[LOAD-ALL] Loaded %d unique %s items for client %s",
+                        "\033[92m[LOAD-ALL] Loaded %d %s for client %s\033[0m",
                         unique_count,
                         self.store_type,
                         client_id
@@ -106,7 +100,7 @@ class MetadataPersistenceStore:
         
         if loaded_count > 0:
             logger.info(
-                "[LOAD-ALL] Loaded %s metadata for %d clients (%d total items)",
+                "\033[92m[LOAD-ALL] Loaded %s metadata for %d clients (%d total items)\033[0m",
                 self.store_type,
                 loaded_count,
                 total_items
@@ -158,9 +152,6 @@ class MetadataPersistenceStore:
     def _append_item(self, client_id: ClientId, item_id: str, item_value: str) -> None:
         """
         Agrega un item al archivo CSV del cliente de forma atómica.
-        
-        Usa append mode con fsync inmediato para durabilidad.
-        CSV es más rápido que JSON para escrituras.
         """
         client_path = self._client_path(client_id)
         

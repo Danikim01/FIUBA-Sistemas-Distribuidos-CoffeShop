@@ -69,13 +69,6 @@ class TopItemsAggregator(ProcessWorker):
         # Load persisted state on startup
         self._load_persisted_state()
         
-        # Track how many EOFs we've received from sharded workers per client
-        # Load persisted EOF counters on startup
-        self.eof_count_per_client: Dict[ClientId, int] = {}
-        self._load_persisted_eof_counters()
-        
-        self.eof_count_lock = threading.Lock()
-        
         logger.info(
             "%s configured with top_per_month=%s, expected_eof_count=%s",
             self.__class__.__name__,
@@ -93,9 +86,6 @@ class TopItemsAggregator(ProcessWorker):
             # Check if client already completed (should not restore state if completed)
             eof_count = self.eof_counter_store.get_counter(client_id)
             if eof_count >= self.expected_eof_count:
-                # Client already completed, don't restore state
-                # BUT: Don't clean up yet - we need to keep EOF UUIDs for deduplication
-                # The state will be cleaned up when we actually process and send results
                 logger.info(
                     f"[ITEMS-AGGREGATOR] Client {client_id} already completed "
                     f"(EOF count: {eof_count}), skipping state restoration "
@@ -144,8 +134,6 @@ class TopItemsAggregator(ProcessWorker):
         # Clear processed messages and aggregation state
         self.processed_messages.clear_client(client_id)
         self.state_store.clear_client(client_id)
-        # NOTE: We DON'T clear eof_counter_store here to keep UUIDs for deduplication
-        # The EOF counter will be cleared when the client disconnects or after a timeout
 
     def _merge_quantity_totals_map(self, client_id: ClientId, totals: Any) -> None:
         if not isinstance(totals, dict):
@@ -326,10 +314,8 @@ class TopItemsAggregator(ProcessWorker):
         if message_uuid:
             self.eof_counter_store.mark_processed(client_id, message_uuid)
         
-        # Increment EOF counter for this client (persisted)
-        with self.eof_count_lock:
-            eof_count = self.eof_counter_store.increment_counter(client_id)
-            self.eof_count_per_client[client_id] = eof_count
+
+        eof_count = self.eof_counter_store.increment_counter(client_id)
         
         logger.info(
             f"[ITEMS-AGGREGATOR] EOF count for client {client_id}: {eof_count}/{self.expected_eof_count}"
@@ -337,15 +323,12 @@ class TopItemsAggregator(ProcessWorker):
         
         with self._pause_message_processing():
             if eof_count >= self.expected_eof_count:
-                # We've received EOFs from all sharded workers
-                # Now send the final aggregated results along with our own EOF
                 logger.info(
                     f"[ITEMS-AGGREGATOR] All EOFs received for client {client_id} "
                     f"({eof_count}/{self.expected_eof_count}). "
                     f"Sending final aggregated results."
                 )
                 
-                # Send final aggregated results
                 payload_batches: list[list[Dict[str, Any]]] = []
                 with self._state_lock:
                     payload = self.create_payload(client_id)
@@ -358,10 +341,6 @@ class TopItemsAggregator(ProcessWorker):
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
                                 
-                # Clean up EOF counter for this client (but keep processed UUIDs in memory for a bit)
-                with self.eof_count_lock:
-                    if client_id in self.eof_count_per_client:
-                        del self.eof_count_per_client[client_id]
             else:
                 # Not all EOFs received yet, just discard this EOF
                 # (we don't need requeue since each sharded worker sends its own EOF)
