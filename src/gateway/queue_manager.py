@@ -4,7 +4,7 @@ import logging
 import queue
 import threading
 from contextlib import suppress
-from typing import List, Sequence, Union
+from typing import Any, List, Sequence, Union
 import uuid
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
