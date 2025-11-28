@@ -53,6 +53,14 @@ class FilterEOFBarrier(BaseWorker):
             f"Replica count: {self.replica_count}"
         )
 
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        """Remove all in-memory and persisted state for a client."""
+        logger.info(f"[CONTROL] Clearing FilterEOFBarrier state for client {client_id}")
+        self._eof_counter_store.clear_client(client_id)
+        self._processed_store.clear_client(client_id)
+        self._transaction_counters.pop(client_id, None)
+        self._duplicate_counters.pop(client_id, None)
+
     def _get_current_message_uuid(self) -> str | None:
         """Get the message UUID from the current message metadata."""
         metadata = self._get_current_message_metadata()
@@ -177,18 +185,7 @@ class FilterEOFBarrier(BaseWorker):
                 f"with new message_uuid {new_message_uuid_from_eof_barrier}\033[0m"
             )
             
-            # CRITICAL: Clear processed state AFTER propagating EOF
-            # This ensures that if the worker crashes, the state is already cleared
-            # and won't interfere with the next client processing.
-            # We clear ALL processed EOF UUIDs and reset counter when all EOFs are received.
-            logger.info(f"\033[32m[FILTER-EOF-BARRIER] Clearing processed EOF state for client {client_id} after propagating EOF\033[0m")
-            self._eof_counter_store.clear_client(client_id)
-            
-            # Clear batch deduplication state (always enabled)
-            logger.info(f"\033[32m[FILTER-EOF-BARRIER] Clearing batch deduplication state for client {client_id} after EOF\033[0m")
-            self._processed_store.clear_client(client_id)
-            
-            # Log final statistics
+            # Log final statistics before clearing state
             total_forwarded = self._transaction_counters.get(client_id, 0)
             total_duplicates = self._duplicate_counters.get(client_id, 0)
 
@@ -197,11 +194,23 @@ class FilterEOFBarrier(BaseWorker):
                 f"Forwarded: {total_forwarded} messages, "
                 f"Duplicates skipped: {total_duplicates} messages"
             )
-            
-            # Clear counters for this client
-            self._transaction_counters.pop(client_id, None)
-            self._duplicate_counters.pop(client_id, None)
+
+            # CRITICAL: Clear processed state AFTER propagating EOF so duplicates
+            # from previous sessions cannot leak into the next client.
+            self._clear_client_state(client_id)
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Delete any partial state for a client when instructed by the gateway."""
+        logger.info(f"[CONTROL] Client reset received for {client_id}")
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Drop every cached counter when a global reset is requested."""
+        logger.info("[CONTROL] Global reset received, clearing FilterEOFBarrier state")
+        self._eof_counter_store.clear_all()
+        self._processed_store.clear_all()
+        self._transaction_counters.clear()
+        self._duplicate_counters.clear()
 
 if __name__ == "__main__":
     run_main(FilterEOFBarrier)
-

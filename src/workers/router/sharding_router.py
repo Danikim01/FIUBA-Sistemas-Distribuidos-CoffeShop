@@ -51,6 +51,11 @@ class ShardingRouter(BaseWorker):
             "to handle batch retries\033[0m"
         )
 
+    def _clear_client_state(self, client_id: ClientId) -> None:
+        """Remove persistence for a single client."""
+        logger.info(f"[CONTROL] Clearing deduplication state for client {client_id}")
+        self._processed_store.clear_client(client_id)
+
     def _get_current_message_uuid(self) -> str | None:
         """Get the message UUID from the current message metadata."""
         metadata = self._get_current_message_metadata()
@@ -164,11 +169,7 @@ class ShardingRouter(BaseWorker):
         )
 
         with self._pause_message_processing():
-            logger.info(
-                "\033[32m[SHARDING-ROUTER] Clearing processed state for client %s after EOF propagation\033[0m",
-                client_id,
-            )
-            self._processed_store.clear_client(client_id)
+            self._clear_client_state(client_id)
 
             for shard_id in range(self.num_shards):
                 routing_key = f"shard_{shard_id}"
@@ -217,6 +218,16 @@ class ShardingRouter(BaseWorker):
         """Clean up resources."""
         logger.info("Cleaning up ShardingRouter")
         super().cleanup()
+
+    def handle_client_reset(self, client_id: ClientId) -> None:
+        """Drop any client-specific deduplication files when instructed."""
+        logger.info(f"[CONTROL] Client reset received for {client_id} on ShardingRouter")
+        self._clear_client_state(client_id)
+
+    def handle_reset_all_clients(self) -> None:
+        """Remove deduplication state for every client."""
+        logger.info("[CONTROL] Global reset received on ShardingRouter, clearing all deduplication state")
+        self._processed_store.clear_all()
 
 
 if __name__ == '__main__':
