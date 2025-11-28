@@ -293,14 +293,14 @@ class EOFCounterStore:
             self._processed_eofs_cache[client_id] = processed_uuids
             return processed_uuids
 
-    def has_processed(self, client_id: ClientId, message_uuid: str) -> bool:
+    def has_processed(self, client_id: ClientId, message_uuid: str | None) -> bool:
         """Check if a EOF UUID has been processed for a client."""
         if not message_uuid:
             return False
         processed_uuids = self._load_processed_eofs_for_client(client_id)
         return message_uuid in processed_uuids
 
-    def mark_processed(self, client_id: ClientId, message_uuid: str) -> None:
+    def mark_processed(self, client_id: ClientId, message_uuid: str | None) -> None:
         """Mark a EOF UUID as processed for a client."""
         if not message_uuid:
             logger.debug(f"[EOF-COUNTER-STORE] Message UUID is None for client {client_id}")
