@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Configurar FileHandler para escribir logs a archivo
 def setup_file_logging(worker_id: int):
-    """Configura un FileHandler para escribir logs a un archivo basado en worker_id."""
+    """Configures a FileHandler to write logs to a file based on worker_id."""
     # Crear directorio de logs si no existe
     log_dir = Path("/app/logs")
     log_dir.mkdir(parents=True, exist_ok=True)

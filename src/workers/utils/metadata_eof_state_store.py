@@ -1,4 +1,4 @@
-"""Tracking de EOFs de metadata por cliente para aggregators finales."""
+"""Tracking of metadata EOFs per client for final aggregators."""
 
 from __future__ import annotations
 
@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 class MetadataEOFStateStore:
     """
-    Trackea EOFs de metadata por cliente (users, stores, menu_items).
-    Permite verificar si todos los EOFs de metadata han llegado antes de procesar transacciones.
+    Tracks metadata EOFs per client (users, stores, menu_items).
+    Allows checking if all metadata EOFs have arrived before processing transactions.
     """
     
     # Tipos de metadata que se trackean
@@ -27,11 +27,11 @@ class MetadataEOFStateStore:
     
     def __init__(self, required_metadata_types: Set[str] | None = None):
         """
-        Inicializa el store de estado de EOFs de metadata.
+        Initialize the metadata EOF state store.
         
         Args:
-            required_metadata_types: Set de tipos de metadata requeridos.
-                                   Si None, usa todos los tipos disponibles.
+            required_metadata_types: Set of required metadata types.
+                                   If None, uses all available types.
         """
         base_dir = os.getenv("STATE_DIR")
         if base_dir:
@@ -56,7 +56,7 @@ class MetadataEOFStateStore:
         self._load_all_clients()
     
     def _cleanup_temp_files(self) -> None:
-        """Limpia archivos temporales de crashes anteriores."""
+        """Cleans up temporary files from previous crashes."""
         temp_files = list(self._store_dir.glob("*.temp.json"))
         for temp_file in temp_files:
             try:
@@ -70,7 +70,7 @@ class MetadataEOFStateStore:
                 )
     
     def _client_path(self, client_id: ClientId) -> Path:
-        """Obtiene la ruta del archivo para un cliente."""
+        """Gets the file path for a client."""
         safe_id = (
             str(client_id)
             .replace("/", "_")
@@ -80,12 +80,12 @@ class MetadataEOFStateStore:
         return self._store_dir / f"{safe_id}.json"
     
     def _compute_checksum(self, payload: Dict) -> str:
-        """Calcula checksum SHA256 para validación de payload."""
+        """Computes SHA256 checksum for payload validation."""
         serialized = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(serialized).hexdigest()
     
     def _load_all_clients(self) -> None:
-        """Carga el estado de todos los clientes desde disco al iniciar."""
+        """Loads the state of all clients from disk on startup."""
         client_files = [
             f for f in self._store_dir.glob("*.json")
             if not f.name.endswith('.temp.json') and not f.name.endswith('.backup.json')
@@ -179,7 +179,7 @@ class MetadataEOFStateStore:
                 )
     
     def _load_client(self, client_id: ClientId) -> Dict[str, bool]:
-        """Carga el estado de un cliente (desde cache o disco)."""
+        """Loads the state of a client (from cache or disk)."""
         with self._lock:
             if client_id in self._cache:
                 return self._cache[client_id].copy()
@@ -206,7 +206,7 @@ class MetadataEOFStateStore:
     
     def _persist_client_atomic(self, client_id: ClientId, metadata_state: Dict[str, bool]) -> None:
         """
-        Persiste el estado de un cliente de forma atómica usando two-phase commit.
+        Persists the state of a client atomically using two-phase commit.
         """
         client_path = self._client_path(client_id)
         temp_path = client_path.with_suffix('.temp.json')
@@ -266,11 +266,11 @@ class MetadataEOFStateStore:
     
     def mark_metadata_done(self, client_id: ClientId, metadata_type: str) -> None:
         """
-        Marca un tipo de metadata como done para un cliente.
+        Marks a metadata type as done for a client.
         
         Args:
-            client_id: Identificador del cliente
-            metadata_type: Tipo de metadata ('users', 'stores', 'menu_items')
+            client_id: Client identifier
+            metadata_type: Metadata type ('users', 'stores', 'menu_items')
         """
         if metadata_type not in self.METADATA_TYPES:
             logger.warning(
@@ -308,13 +308,13 @@ class MetadataEOFStateStore:
     
     def are_all_metadata_done(self, client_id: ClientId) -> bool:
         """
-        Verifica si todos los tipos de metadata requeridos están done para un cliente.
+        Checks if all required metadata types are done for a client.
         
         Args:
-            client_id: Identificador del cliente
+            client_id: Client identifier
             
         Returns:
-            True si todos los tipos de metadata requeridos están done, False en caso contrario
+            True if all required metadata types are done, False otherwise
         """
         with self._lock:
             metadata_state = self._load_client(client_id)
@@ -334,7 +334,7 @@ class MetadataEOFStateStore:
             return True
     
     def clear_client(self, client_id: ClientId) -> None:
-        """Limpia el estado de un cliente."""
+        """Clears the state of a client."""
         with self._lock:
             self._cache.pop(client_id, None)
             path = self._client_path(client_id)
@@ -348,6 +348,6 @@ class MetadataEOFStateStore:
             )
     
     def get_metadata_state(self, client_id: ClientId) -> Dict[str, bool]:
-        """Obtiene el estado de metadata para un cliente (copia)."""
+        """Gets the metadata state for a client (copy)."""
         return self._load_client(client_id)
 

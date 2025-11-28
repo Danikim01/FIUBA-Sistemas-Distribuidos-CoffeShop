@@ -1,4 +1,4 @@
-"""Persistencia del estado intermedio de agregación para aggregators finales."""
+"""Persistence of intermediate aggregation state for final aggregators."""
 
 from __future__ import annotations
 
@@ -18,23 +18,23 @@ logger = logging.getLogger(__name__)
 
 class AggregatorStateStore:
     """
-    Persistencia del estado intermedio de agregación para aggregators finales.
+    Persistence of intermediate aggregation state for final aggregators.
     
-    Usa un protocolo de two-phase commit similar a EOFCounterStore:
-    1. Escribe a archivo temporal con fsync
-    2. Valida integridad del archivo temporal (checksum)
-    3. Reemplaza atómicamente el archivo original con el temporal (con backup)
+    Uses a two-phase commit protocol similar to EOFCounterStore:
+    1. Writes to temporary file with fsync
+    2. Validates integrity of temporary file (checksum)
+    3. Atomically replaces original file with temporary (with backup)
     
-    Esto asegura atomicidad - si el worker crashea después de procesar un batch,
-    el estado intermedio está disponible cuando el worker reinicia.
+    This ensures atomicity - if the worker crashes after processing a batch,
+    the intermediate state is available when the worker restarts.
     """
     
     def __init__(self, worker_label: str):
         """
-        Inicializa el store de estado de agregación.
+        Initialize the aggregation state store.
         
         Args:
-            worker_label: Etiqueta del worker (ej: 'top_clients_aggregator')
+            worker_label: Worker label (e.g., 'top_clients_aggregator')
         """
         base_dir = os.getenv("STATE_DIR")
         if base_dir:
@@ -54,7 +54,7 @@ class AggregatorStateStore:
         self._load_all_clients()
     
     def _cleanup_temp_files(self) -> None:
-        """Limpia archivos temporales de crashes anteriores."""
+        """Cleans up temporary files from previous crashes."""
         temp_files = list(self._store_dir.glob("*.temp.json"))
         for temp_file in temp_files:
             try:
@@ -68,7 +68,7 @@ class AggregatorStateStore:
                 )
     
     def _client_path(self, client_id: ClientId) -> Path:
-        """Obtiene la ruta del archivo para un cliente."""
+        """Gets the file path for a client."""
         safe_id = (
             str(client_id)
             .replace("/", "_")
@@ -78,12 +78,12 @@ class AggregatorStateStore:
         return self._store_dir / f"{safe_id}.json"
     
     def _compute_checksum(self, payload: Dict[str, Any]) -> str:
-        """Calcula checksum SHA256 para validación de payload."""
+        """Computes SHA256 checksum for payload validation."""
         serialized = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
         return hashlib.sha256(serialized).hexdigest()
     
     def _load_all_clients(self) -> None:
-        """Carga el estado de todos los clientes desde disco al iniciar."""
+        """Loads the state of all clients from disk on startup."""
         # Buscar todos los archivos de clientes (excluir temp y backup)
         client_files = [
             f for f in self._store_dir.glob("*.json")
@@ -176,7 +176,7 @@ class AggregatorStateStore:
             )
     
     def _load_client(self, client_id: ClientId) -> Dict[str, Any]:
-        """Carga el estado de un cliente (desde cache o disco)."""
+        """Loads the state of a client (from cache or disk)."""
         with self._lock:
             if client_id in self._cache:
                 return self._cache[client_id]
@@ -203,12 +203,12 @@ class AggregatorStateStore:
     
     def _persist_client_atomic(self, client_id: ClientId, state_data: Dict[str, Any]) -> None:
         """
-        Persiste el estado de un cliente de forma atómica usando two-phase commit.
+        Persists the state of a client atomically using two-phase commit.
         
-        Protocolo:
-        1. Escribe a archivo temporal con fsync
-        2. Valida integridad del archivo temporal (checksum)
-        3. Reemplaza atómicamente el archivo original con el temporal (con backup)
+        Protocol:
+        1. Writes to temporary file with fsync
+        2. Validates integrity of temporary file (checksum)
+        3. Atomically replaces original file with temporary (with backup)
         """
         client_path = self._client_path(client_id)
         temp_path = client_path.with_suffix('.temp.json')
@@ -272,11 +272,11 @@ class AggregatorStateStore:
             raise
     
     def get_state(self, client_id: ClientId) -> Dict[str, Any]:
-        """Obtiene el estado de un cliente."""
+        """Gets the state of a client."""
         return self._load_client(client_id).copy()
     
     def save_state(self, client_id: ClientId, state_data: Dict[str, Any]) -> None:
-        """Guarda el estado de un cliente."""
+        """Saves the state of a client."""
         with self._lock:
             # Actualizar cache
             self._cache[client_id] = state_data.copy()
@@ -285,7 +285,7 @@ class AggregatorStateStore:
             self._persist_client_atomic(client_id, state_data)
     
     def clear_client(self, client_id: ClientId) -> None:
-        """Limpia el estado de un cliente."""
+        """Clears the state of a client."""
         with self._lock:
             self._cache.pop(client_id, None)
             path = self._client_path(client_id)
@@ -300,7 +300,7 @@ class AggregatorStateStore:
             )
     
     def has_state(self, client_id: ClientId) -> bool:
-        """Verifica si un cliente tiene estado persistido."""
+        """Checks if a client has persisted state."""
         with self._lock:
             if client_id in self._cache:
                 return bool(self._cache[client_id])

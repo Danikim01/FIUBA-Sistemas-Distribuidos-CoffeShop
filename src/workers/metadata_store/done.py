@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 class Done:
     def __init__(self, store_name: str):
         """
-        Inicializa el estado Done con persistencia en disco.
+        Initialize the Done state with disk persistence.
         
         Args:
-            store_name: Nombre del store (stores, users, menu_items) para identificar el archivo de persistencia
+            store_name: Store name (stores, users, menu_items) to identify the persistence file
         """
         self.store_name = store_name
         self.client_done: dict[ClientId, threading.Event] = {}
@@ -24,7 +24,7 @@ class Done:
         self._load_persisted_state()
     
     def _get_persistence_path(self) -> Path:
-        """Obtiene la ruta del archivo de persistencia para el estado Done."""
+        """Gets the persistence file path for the Done state."""
         base_dir = os.getenv("STATE_DIR")
         if base_dir:
             persistence_dir = Path(base_dir) / "metadata_store" / "done"
@@ -41,7 +41,7 @@ class Done:
         return persistence_dir / f"{safe_name}.csv"
     
     def _load_persisted_state(self) -> None:
-        """Carga el estado Done persistido desde disco al inicializar."""
+        """Loads the persisted Done state from disk on initialization."""
         path = self._get_persistence_path()
         
         if not path.exists():
@@ -72,7 +72,7 @@ class Done:
             )
     
     def _persist_state(self) -> None:
-        """Persiste el estado Done actual en disco."""
+        """Persists the current Done state to disk."""
         path = self._get_persistence_path()
         
         try:
@@ -112,7 +112,7 @@ class Done:
         return done_event.wait(timeout=timeout) if block else done_event.is_set()
     
     def set_done(self, client_id: ClientId):
-        """Marca un cliente como done y persiste el estado en disco."""
+        """Marks a client as done and persists the state to disk."""
         with self._lock:
             done_event = self.client_done.setdefault(client_id, threading.Event())
             if not done_event.is_set():
@@ -125,7 +125,7 @@ class Done:
                 )
     
     def clear_client(self, client_id: ClientId) -> None:
-        """Limpia el estado done para un cliente y actualiza la persistencia."""
+        """Clears the done state for a client and updates persistence."""
         with self._lock:
             if client_id in self.client_done:
                 self.client_done[client_id].clear()

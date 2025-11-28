@@ -1,4 +1,4 @@
-"""Persistencia append-only para metadata stores (users, stores, menu_items)."""
+"""Append-only persistence for metadata stores (users, stores, menu_items)."""
 
 from __future__ import annotations
 
@@ -17,20 +17,20 @@ logger = logging.getLogger(__name__)
 
 class MetadataPersistenceStore:
     """
-    Persistencia append-only para metadata stores usando CSV.
+    Append-only persistence for metadata stores using CSV.
     
-    Cada cliente tiene un archivo CSV con formato: id,value
-    Nuevos items se agregan con append + fsync para durabilidad.
+    Each client has a CSV file with format: id,value
+    New items are added with append + fsync for durability.
     """
     
     def __init__(self, store_type: str, id_key: str, value_key: str):
         """
-        Inicializa el store de persistencia.
+        Initialize the persistence store.
         
         Args:
-            store_type: Tipo de store ('users', 'stores', 'menu_items')
-            id_key: Nombre de la columna ID (ej: 'user_id', 'store_id', 'item_id')
-            value_key: Nombre de la columna valor (ej: 'birthday', 'store_name', 'item_name')
+            store_type: Store type ('users', 'stores', 'menu_items')
+            id_key: ID column name (e.g., 'user_id', 'store_id', 'item_id')
+            value_key: Value column name (e.g., 'birthday', 'store_name', 'item_name')
         """
         base_dir = os.getenv("STATE_DIR")
         if base_dir:
@@ -51,7 +51,7 @@ class MetadataPersistenceStore:
         self._load_all_clients()
     
     def _client_path(self, client_id: ClientId) -> Path:
-        """Obtiene la ruta del archivo para un cliente (CSV)."""
+        """Gets the file path for a client (CSV)."""
         safe_id = (
             str(client_id)
             .replace("/", "_")
@@ -61,7 +61,7 @@ class MetadataPersistenceStore:
         return self._store_dir / f"{safe_id}.csv"
     
     def _load_all_clients(self) -> None:
-        """Carga todos los datos de clientes desde disco al iniciar."""
+        """Loads all client data from disk on startup."""
         client_files = list(self._store_dir.glob("*.csv"))
         logger.debug(
             "[LOAD-ALL] Found %d CSV files for %s in directory: %s",
@@ -107,7 +107,7 @@ class MetadataPersistenceStore:
             )
     
     def _load_client_from_disk(self, client_id: ClientId) -> Dict[str, str]:
-        """Carga datos de un cliente desde disco (CSV)."""
+        """Loads client data from disk (CSV)."""
         path = self._client_path(client_id)
         data: Dict[str, str] = {}
         
@@ -140,7 +140,7 @@ class MetadataPersistenceStore:
         return data
     
     def _load_client(self, client_id: ClientId) -> Dict[str, str]:
-        """Carga datos de un cliente (desde cache o disco)."""
+        """Loads client data (from cache or disk)."""
         with self._lock:
             if client_id in self._cache:
                 return self._cache[client_id]
@@ -151,7 +151,7 @@ class MetadataPersistenceStore:
     
     def _append_item(self, client_id: ClientId, item_id: str, item_value: str) -> None:
         """
-        Agrega un item al archivo CSV del cliente de forma atómica.
+        Appends an item to the client's CSV file atomically.
         """
         client_path = self._client_path(client_id)
         
@@ -170,9 +170,9 @@ class MetadataPersistenceStore:
     
     def _append_batch(self, client_id: ClientId, items: Dict[str, str]) -> None:
         """
-        Agrega un batch de items al archivo CSV del cliente de forma atómica.
+        Appends a batch of items to the client's CSV file atomically.
         
-        Más eficiente que múltiples _append_item para batches grandes.
+        More efficient than multiple _append_item calls for large batches.
         """
         if not items:
             return
@@ -196,9 +196,9 @@ class MetadataPersistenceStore:
     
     def save_item(self, client_id: ClientId, item_id: str, item_value: str) -> None:
         """
-        Guarda un item para un cliente.
+        Saves an item for a client.
         
-        Si el item ya existe, lo actualiza (agrega nueva línea, el último valor gana).
+        If the item already exists, it updates it (adds new line, last value wins).
         """
         if not item_id or not item_value:
             logger.debug(
@@ -226,7 +226,7 @@ class MetadataPersistenceStore:
             self._append_item(client_id, item_id, item_value)
     
     def save_batch(self, client_id: ClientId, items: Dict[str, str]) -> None:
-        """Guarda un batch de items para un cliente."""
+        """Saves a batch of items for a client."""
         if not items:
             return
         
@@ -247,16 +247,16 @@ class MetadataPersistenceStore:
             self._append_batch(client_id, valid_items)
     
     def get_item(self, client_id: ClientId, item_id: str) -> str:
-        """Obtiene un item para un cliente."""
+        """Gets an item for a client."""
         data = self._load_client(client_id)
         return data.get(item_id, self._get_default_value())
     
     def get_all_items(self, client_id: ClientId) -> Dict[str, str]:
-        """Obtiene todos los items para un cliente."""
+        """Gets all items for a client."""
         return self._load_client(client_id).copy()
     
     def _get_default_value(self) -> str:
-        """Retorna el valor por defecto según el tipo de store."""
+        """Returns the default value according to the store type."""
         defaults = {
             'users': "Unknown Birthday",
             'stores': 'Unknown Store',
@@ -265,7 +265,7 @@ class MetadataPersistenceStore:
         return defaults.get(self.store_type, "Unknown")
     
     def clear_client(self, client_id: ClientId) -> None:
-        """Limpia los datos de un cliente."""
+        """Clears the data of a client."""
         with self._lock:
             self._cache.pop(client_id, None)
             path = self._client_path(client_id)
@@ -276,7 +276,7 @@ class MetadataPersistenceStore:
             )
     
     def has_item(self, client_id: ClientId, item_id: str) -> bool:
-        """Verifica si un item existe para un cliente."""
+        """Checks if an item exists for a client."""
         data = self._load_client(client_id)
         return item_id in data
 

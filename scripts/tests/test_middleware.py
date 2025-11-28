@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Pruebas unitarias para el middleware de RabbitMQ.
-Cubre todos los escenarios requeridos por la cátedra.
+Unit tests for RabbitMQ middleware.
+Covers all scenarios required by the course.
 """
 
 import pytest
@@ -21,11 +21,11 @@ warnings.filterwarnings("ignore", category=pytest.PytestUnhandledThreadException
 
 
 class TestRabbitMQMiddleware:
-    """Clase base para las pruebas del middleware."""
+    """Base class for middleware tests."""
     
     @pytest.fixture(autouse=True)
     def setup(self):
-        """Configuración inicial para cada prueba."""
+        """Initial setup for each test."""
         self.rabbitmq_host = os.getenv('RABBITMQ_HOST', 'localhost')
         self.rabbitmq_port = int(os.getenv('RABBITMQ_PORT', '5672'))
         
@@ -34,13 +34,13 @@ class TestRabbitMQMiddleware:
     
     @pytest.fixture(autouse=True)
     def teardown(self):
-        """Limpieza después de cada prueba."""
+        """Cleanup after each test."""
         yield
         # Limpiar colas y exchanges después de cada prueba
         self._cleanup_queues_and_exchanges()
     
     def _cleanup_queues_and_exchanges(self):
-        """Limpia colas y exchanges de pruebas anteriores."""
+        """Cleans up queues and exchanges from previous tests."""
         try:
             # Limpiar colas de prueba
             queue = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
@@ -73,10 +73,10 @@ class TestRabbitMQMiddleware:
 
 
 class TestWorkingQueue1To1(TestRabbitMQMiddleware):
-    """Pruebas para Working Queue 1 a 1."""
+    """Tests for Working Queue 1 to 1."""
     
     def test_queue_1to1_basic_communication(self):
-        """Prueba comunicación básica 1 a 1 por cola."""
+        """Tests basic 1 to 1 communication via queue."""
         # Crear middleware para producer y consumer
         producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
         consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
@@ -128,7 +128,7 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
             consumer.close()
     
     def test_queue_1to1_message_ordering(self):
-        """Prueba que los mensajes se reciben en orden."""
+        """Tests that messages are received in order."""
         producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
         consumer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1", prefetch_count=1)
         
@@ -168,10 +168,10 @@ class TestWorkingQueue1To1(TestRabbitMQMiddleware):
 
 
 class TestWorkingQueue1ToN(TestRabbitMQMiddleware):
-    """Pruebas para Working Queue 1 a N (competing consumers)."""
+    """Tests for Working Queue 1 to N (competing consumers)."""
     
     def test_queue_1toN_competing_consumers(self):
-        """Prueba que múltiples consumers compiten por mensajes."""
+        """Tests that multiple consumers compete for messages."""
         producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1toN")
         consumer1 = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1toN")
         consumer2 = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1toN")
@@ -245,10 +245,10 @@ class TestWorkingQueue1ToN(TestRabbitMQMiddleware):
 
 
 class TestExchange1To1(TestRabbitMQMiddleware):
-    """Pruebas para Exchange 1 a 1."""
+    """Tests for Exchange 1 to 1."""
     
     def test_exchange_1to1_basic_communication(self):
-        """Prueba comunicación básica 1 a 1 por exchange."""
+        """Tests basic 1 to 1 communication via exchange."""
         producer = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1to1", ["route1"])
         consumer = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1to1", ["route1"])
         
@@ -296,7 +296,7 @@ class TestExchange1To1(TestRabbitMQMiddleware):
             consumer.close()
     
     def test_exchange_1to1_routing_key_filtering(self):
-        """Prueba que solo se reciben mensajes con la routing key correcta."""
+        """Tests that only messages with the correct routing key are received."""
         producer = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1to1", ["route1", "route2"])
         consumer = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1to1", ["route1"])
         
@@ -337,10 +337,10 @@ class TestExchange1To1(TestRabbitMQMiddleware):
 
 
 class TestExchange1ToN(TestRabbitMQMiddleware):
-    """Pruebas para Exchange 1 a N."""
+    """Tests for Exchange 1 to N."""
     
     def test_exchange_1toN_multiple_routing_keys(self):
-        """Prueba que múltiples consumers reciben mensajes según sus routing keys."""
+        """Tests that multiple consumers receive messages according to their routing keys."""
         producer = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1toN", ["route1", "route2"])
         consumer1 = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1toN", ["route1"])
         consumer2 = RabbitMQMiddlewareExchange(self.rabbitmq_host, "test_exchange_1toN", ["route2"])
@@ -433,17 +433,17 @@ class TestExchange1ToN(TestRabbitMQMiddleware):
 
 
 class TestErrorHandling(TestRabbitMQMiddleware):
-    """Pruebas de manejo de errores."""
+    """Error handling tests."""
     
     def test_connection_error(self):
-        """Prueba manejo de errores de conexión."""
+        """Tests connection error handling."""
         # Intentar conectar a un host inexistente
         with pytest.raises(MessageMiddlewareDisconnectedError):
             producer = RabbitMQMiddlewareQueue("host_inexistente", "test_queue")
             producer.send({"test": "message"})
     
     def test_serialization_error(self):
-        """Prueba manejo de errores de serialización."""
+        """Tests serialization error handling."""
         producer = RabbitMQMiddlewareQueue(self.rabbitmq_host, "test_queue_1to1")
         
         # Intentar enviar un objeto no serializable

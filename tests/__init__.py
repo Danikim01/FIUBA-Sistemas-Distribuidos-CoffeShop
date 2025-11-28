@@ -1,2 +1,2 @@
-"""Tests para el sistema de análisis de Coffee Shop."""
+"""Tests for the Coffee Shop analysis system."""
 

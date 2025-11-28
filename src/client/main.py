@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 shutdown_requested = False
 
 def handle_sigterm(signum, frame):
-    """Maneja la señal SIGTERM para terminar ordenadamente"""
+    """Handles SIGTERM signal for graceful termination"""
     global shutdown_requested
     logger.info("SIGTERM recibido, iniciando shutdown ordenado...")
     shutdown_requested = True
