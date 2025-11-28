@@ -1,7 +1,7 @@
 """Utilities for sharding data across workers."""
 
 import hashlib
-from typing import Union
+from typing import Any, Mapping, Union
 
 
 def get_shard_id(store_id: Union[str, int], num_shards: int) -> int:
@@ -53,12 +53,12 @@ def get_routing_key_by_item_id(item_id: Union[str, int], num_shards: int) -> str
     return f"shard_{shard_id}"
 
 
-def extract_store_id_from_payload(payload: dict) -> Union[str, int, None]:
+def extract_store_id_from_payload(payload: Mapping[str, Any]) -> Union[str, int, None]:
     """
-    Extract store_id from transaction payload.
+    Extract store_id from transaction payload or mapping.
     
     Args:
-        payload: Transaction data dictionary
+        payload: Transaction data mapping
         
     Returns:
         store_id if found, None otherwise
@@ -66,12 +66,12 @@ def extract_store_id_from_payload(payload: dict) -> Union[str, int, None]:
     return payload.get('store_id')
 
 
-def extract_item_id_from_payload(payload: dict) -> Union[str, int, None]:
+def extract_item_id_from_payload(payload: Mapping[str, Any]) -> Union[str, int, None]:
     """
-    Extract item_id from transaction item payload.
+    Extract item_id from transaction item payload or mapping.
     
     Args:
-        payload: Transaction item data dictionary
+        payload: Transaction item data mapping
         
     Returns:
         item_id if found, None otherwise

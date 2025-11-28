@@ -3,8 +3,8 @@
 import logging
 import queue
 import threading
-from typing import List, Any, Union
 from contextlib import suppress
+from typing import List, Sequence, Union
 import uuid
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 from middleware.thread_aware_publishers import ThreadAwareExchangePublisher, ThreadAwareQueuePublisher
@@ -610,10 +610,13 @@ class QueueManager:
             self._batch_counters.pop(client_id, None)
     
     @staticmethod
-    def _create_chunks(items: List[Union[Transaction, TransactionItem, User, Store, MenuItem]], chunk_size: int) -> List[List[Union[Transaction, TransactionItem, User, Store, MenuItem]]]:
+    def _create_chunks(
+        items: Sequence[Union[Transaction, TransactionItem, User, Store, MenuItem]],
+        chunk_size: int,
+    ) -> List[List[Union[Transaction, TransactionItem, User, Store, MenuItem]]]:
         """Divide items into chunks for optimized processing."""
         chunks = []
         for i in range(0, len(items), chunk_size):
-            chunk = items[i:i + chunk_size]
+            chunk = list(items[i:i + chunk_size])
             chunks.append(chunk)
         return chunks
