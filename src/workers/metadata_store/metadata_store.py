@@ -2,7 +2,13 @@ from abc import ABC, abstractmethod
 import logging
 import threading
 from typing import Any, Optional
-from message_utils import ClientId, extract_data_and_client_id, is_eof_message
+from message_utils import (
+    ClientId,
+    extract_data_and_client_id,
+    is_client_reset_message,
+    is_eof_message,
+    is_reset_all_clients_message,
+)
 from middleware.rabbitmq_middleware import RabbitMQMiddlewareExchange, RabbitMQMiddlewareQueue
 
 logger = logging.getLogger(__name__)
@@ -43,6 +49,41 @@ class MetadataStore(ABC):
         def on_message(message):
             try:
                 client_id, data, _ = extract_data_and_client_id(message)
+
+                if is_reset_all_clients_message(message):
+                    logger.info(
+                        f"[METADATA-STORE {self.name}] Global reset control message received, clearing all metadata"
+                    )
+                    try:
+                        self.reset_all()
+                    except Exception as exc:
+                        logger.error(
+                            f"[METADATA-STORE {self.name}] Failed to reset all metadata: {exc}",
+                            exc_info=True,
+                        )
+                    if self.eof_state_store:
+                        self.eof_state_store.clear_all()
+                    return
+
+                if is_client_reset_message(message):
+                    if not client_id or client_id.strip() == '':
+                        logger.warning(
+                            f"[METADATA-STORE {self.name}] Client reset message missing client_id, ignoring"
+                        )
+                        return
+                    logger.info(
+                        f"[METADATA-STORE {self.name}] Client reset control message received for {client_id}"
+                    )
+                    try:
+                        self.reset_state(client_id)
+                    except Exception as exc:
+                        logger.error(
+                            f"[METADATA-STORE {self.name}] Failed to reset client {client_id}: {exc}",
+                            exc_info=True,
+                        )
+                    if self.eof_state_store:
+                        self.eof_state_store.clear_client(client_id)
+                    return
                 
                 # Validar que el client_id esté presente
                 if not client_id or client_id.strip() == '':
@@ -151,6 +192,11 @@ class MetadataStore(ABC):
         Args:
             message: The message to handle
         """
+        raise NotImplementedError
+
+    @abstractmethod
+    def reset_all(self) -> None:
+        """Reset metadata for every client."""
         raise NotImplementedError
     
     @abstractmethod
