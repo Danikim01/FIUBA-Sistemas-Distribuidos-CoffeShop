@@ -91,17 +91,6 @@ class TPVAggregator(ProcessWorker):
         self.processed_messages.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
 
-    def _clear_all_state(self) -> None:
-        """Clear all state and persistence for every client."""
-        with self._state_lock:
-            self.recieved_payloads.clear()
-
-        self.stores_source.reset_all()
-        self.state_store.clear_all()
-        self.metadata_eof_state.clear_all()
-        self.processed_messages.clear_all()
-        self.eof_counter_store.clear_all()
-
     def reset_state(self, client_id: ClientId) -> None:
         self._clear_client_state(client_id)
 
@@ -281,7 +270,14 @@ class TPVAggregator(ProcessWorker):
     def handle_reset_all_clients(self) -> None:
         """Delete all clients' state when a global reset control message arrives."""
         logger.info("[CONTROL] TPVAggregator received global reset request")
-        self._clear_all_state()
+        with self._state_lock:
+            self.recieved_payloads.clear()
+
+        self.stores_source.reset_all()
+        self.state_store.clear_all()
+        self.metadata_eof_state.clear_all()
+        self.processed_messages.clear_all()
+        self.eof_counter_store.clear_all()
 
 
 if __name__ == "__main__":

@@ -94,18 +94,6 @@ class TopClientsAggregator(ProcessWorker):
         self.state_store.clear_client(client_id)
         self.processed_messages.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
-
-    def _clear_all_state(self) -> None:
-        with self._state_lock:
-            self.recieved_payloads.clear()
-
-        self.stores_source.reset_all()
-        self.birthdays_source.reset_all()
-        self.metadata_eof_state.clear_all()
-        self.state_store.clear_all()
-        self.processed_messages.clear_all()
-        self.eof_counter_store.clear_all()
-
     
     def process_transaction(self, client_id: str, payload: dict[str, Any]) -> None:
         self.recieved_payloads.setdefault(client_id, []).append(payload)
@@ -316,7 +304,15 @@ class TopClientsAggregator(ProcessWorker):
     def handle_reset_all_clients(self) -> None:
         """Handle reset instructions for all clients."""
         logger.info("[CONTROL] TopClientsAggregator received global reset request")
-        self._clear_all_state()
+        with self._state_lock:
+            self.recieved_payloads.clear()
+
+        self.stores_source.reset_all()
+        self.birthdays_source.reset_all()
+        self.metadata_eof_state.clear_all()
+        self.state_store.clear_all()
+        self.processed_messages.clear_all()
+        self.eof_counter_store.clear_all()
 
 
 if __name__ == '__main__':
