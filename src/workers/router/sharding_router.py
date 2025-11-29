@@ -219,22 +219,30 @@ class ShardingRouter(BaseWorker):
         logger.info("Cleaning up ShardingRouter")
         super().cleanup()
 
-    def _send_control_to_output(self, message: Dict[str, Any]) -> None:
+    def _send_control_to_output(self, message: Dict[str, Any], client_id: ClientId) -> None:
         """
         Base worker method overridden to propagate control messages to every shard when the router publishes to an exchange.
         """
         for shard_id in range(self.num_shards):
             routing_key = f"shard_{shard_id}"
             shard_message = dict(message)
+            current_message_uuid = shard_message["message_uuid"]
+            message_uuid = self.add_sharding_id_to_uuid_if_missing(current_message_uuid, routing_key)
             logger.info(
                 "[CONTROL] Propagating control message to %s with message_uuid %s",
                 routing_key,
-                shard_message["message_uuid"],
+                message_uuid,
             )
             try:
-                self.middleware_config.output_middleware.send(
-                    shard_message,
+                # self.middleware_config.output_middleware.send(
+                #     shard_message,
+                #     routing_key=routing_key,
+                # )
+                self.send_message(
+                    client_id=client_id,
+                    data=shard_message,
                     routing_key=routing_key,
+                    message_uuid=message_uuid,
                 )
             except Exception as exc:
                 logger.error(

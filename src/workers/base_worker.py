@@ -168,7 +168,7 @@ class BaseWorker(ABC):
                 if is_client_reset_message(message):
                     logger.info("[CONTROL] Client reset message received for %s on %s", client_id, self.__class__.__name__)
                     self.handle_client_reset(client_id)
-                    self._send_control_to_output(message)
+                    self._send_control_to_output(message, client_id)
                     return
 
                 if is_eof_message(message):
@@ -324,7 +324,7 @@ class BaseWorker(ABC):
         """Handle a control message that requests global cleanup."""
         logger.info("[CONTROL] %s received global reset (default handler)", self.__class__.__name__)
 
-    def _send_control_to_output(self, message: Dict[str, Any]) -> None:
+    def _send_control_to_output(self, message: Dict[str, Any], client_id: ClientId = None) -> None:
         """Send the control message to the worker's configured output middleware."""
         try:
             self.middleware_config.output_middleware.send(message)
