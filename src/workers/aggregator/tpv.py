@@ -11,6 +11,7 @@ from workers.utils.processed_message_store import ProcessedMessageStore
 from workers.utils.eof_counter_store import EOFCounterStore
 from workers.utils.aggregator_state_store import AggregatorStateStore
 from workers.utils.metadata_eof_state_store import MetadataEOFStateStore
+from workers.utils.pending_state_store import PendingStateStore
 from worker_utils import normalize_tpv_entry, safe_int_conversion, tpv_sort_key, run_main # pyright: ignore[reportMissingImports]
 
 logging.basicConfig(level=logging.INFO)
@@ -22,13 +23,19 @@ class TPVAggregator(ProcessWorker):
     def __init__(self) -> None:
         super().__init__()
         self.chunk_payload = False
+
+        self.pending_state = PendingStateStore(worker_label="tpv_aggregator")
+        self._pending_processing_lock = threading.Lock()
+        self._pending_processing_clients: set[ClientId] = set()
         
         # Metadata EOF tracking: Track EOFs for stores
-        self.metadata_eof_state = MetadataEOFStateStore(required_metadata_types={'stores'})
+        self.metadata_eof_state = MetadataEOFStateStore(
+            required_metadata_types={'stores'},
+            on_client_ready=self._on_metadata_ready,
+        )
         
         # Create metadata store with EOF state tracking
         self.stores_source = StoresMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
-        self.stores_source.start_consuming()
         
         # Number of sharded workers we expect EOFs from (must be set before loading state)
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
@@ -47,6 +54,9 @@ class TPVAggregator(ProcessWorker):
             ClientId, DefaultDict[YearHalf, DefaultDict[StoreId, float]]
         ] = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         self._load_persisted_state()
+        self._process_ready_clients_on_startup()
+
+        self.stores_source.start_consuming()
         
     
     def _load_persisted_state(self) -> None:
@@ -88,6 +98,7 @@ class TPVAggregator(ProcessWorker):
         self.stores_source.reset_state(client_id)
         self.state_store.clear_client(client_id)
         self.metadata_eof_state.clear_client(client_id)
+        self.pending_state.clear_client(client_id)
         self.processed_messages.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
 
@@ -105,20 +116,16 @@ class TPVAggregator(ProcessWorker):
     
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
         """Process a batch with deduplication and metadata readiness check."""
+        message_uuid = self._get_current_message_uuid()
+
         # Check if all metadata EOFs have been received for this client
         metadata_state = self.metadata_eof_state.get_metadata_state(client_id)
         if not self.metadata_eof_state.are_all_metadata_done(client_id):
-            # Not all metadata EOFs received yet, reject and requeue the message
-            logger.info(
-                    f"\033[91m[TPV-AGGREGATOR] Not all metadata EOFs received for client {client_id}, "
-                    f"requeuing transaction batch. Required: {self.metadata_eof_state.required_metadata_types}, "
-                    f"Current state: {metadata_state}\033[0m"
-            )
-            raise InterruptedError(
-                f"\033[91mMetadata not ready for client {client_id}, message will be requeued\033[0m"
-            )
+            self._store_pending_batch(client_id, batch, message_uuid, metadata_state)
+            return
         
-        message_uuid = self._get_current_message_uuid()
+        # If metadata just became ready, replay pending batches before handling this one
+        self._process_pending_batches(client_id)
         
         # Check for duplicate message
         if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
@@ -128,17 +135,7 @@ class TPVAggregator(ProcessWorker):
             )
             return
         
-        # Process the batch
-        with self._state_lock:
-            for entry in batch:
-                self.process_transaction(client_id, entry)
-        
-        # Persist state after processing batch (for fault tolerance)
-        self._persist_state(client_id)
-        
-        # Mark message as processed after successful processing
-        if message_uuid:
-            self.processed_messages.mark_processed(client_id, message_uuid)
+        self._process_ready_batch(batch, client_id, message_uuid)
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
@@ -150,6 +147,97 @@ class TPVAggregator(ProcessWorker):
             'recieved_payloads': payloads_data
         }
         self.state_store.save_state(client_id, state_data)
+
+    def _process_ready_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        client_id: ClientId,
+        message_uuid: Optional[str],
+    ) -> None:
+        if not batch:
+            return
+
+        with self._state_lock:
+            for entry in batch:
+                self.process_transaction(client_id, entry)
+
+        self._persist_state(client_id)
+
+        if message_uuid:
+            self.processed_messages.mark_processed(client_id, message_uuid)
+
+    def _store_pending_batch(
+        self,
+        client_id: ClientId,
+        batch: List[Dict[str, Any]],
+        message_uuid: Optional[str],
+        metadata_state: Optional[Dict[str, bool]] = None,
+    ) -> None:
+        stored = self.pending_state.add_batch(client_id, batch, message_uuid)
+        if stored:
+            logger.info(
+                "[TPV-AGGREGATOR] Metadata not ready for client %s, stored batch as pending "
+                "(state=%s)",
+                client_id,
+                metadata_state,
+            )
+        else:
+            logger.info(
+                "[TPV-AGGREGATOR] Metadata not ready for client %s, pending batch already stored "
+                "(state=%s)",
+                client_id,
+                metadata_state,
+            )
+
+    def _process_pending_batches(self, client_id: ClientId) -> None:
+        with self._pending_processing_lock:
+            if client_id in self._pending_processing_clients:
+                return
+            self._pending_processing_clients.add(client_id)
+
+        try:
+            pending_entries = self.pending_state.get_batches(client_id)
+            if not pending_entries:
+                return
+
+            logger.info(
+                "[TPV-AGGREGATOR] Replaying %s pending batches for client %s after metadata ready",
+                len(pending_entries),
+                client_id,
+            )
+
+            for entry in pending_entries:
+                batch = entry.get("batch") or []
+                if not batch:
+                    continue
+                pending_uuid = entry.get("message_uuid")
+                if pending_uuid and self.processed_messages.has_processed(client_id, pending_uuid):
+                    logger.info(
+                        "[TPV-AGGREGATOR] Skipping already processed pending batch %s for client %s",
+                        pending_uuid,
+                        client_id,
+                    )
+                    continue
+                self._process_ready_batch(batch, client_id, pending_uuid)
+
+            self.pending_state.clear_client(client_id)
+        finally:
+            with self._pending_processing_lock:
+                self._pending_processing_clients.discard(client_id)
+
+    def _on_metadata_ready(self, client_id: ClientId) -> None:
+        threading.Thread(
+            target=self._process_pending_batches,
+            args=(client_id,),
+            daemon=True,
+            name=f"TPVPendingReplayer-{client_id}",
+        ).start()
+
+    def _process_ready_clients_on_startup(self) -> None:
+        ready_clients = self.metadata_eof_state.get_ready_clients()
+        for client_id in ready_clients:
+            if self.pending_state.has_pending(client_id):
+                self._on_metadata_ready(client_id)
 
     def get_store_name(self, client_id: ClientId, store_id: StoreId) -> str:
         return self.stores_source.get_item_when_done(client_id, str(store_id))
@@ -276,6 +364,7 @@ class TPVAggregator(ProcessWorker):
         self.stores_source.reset_all()
         self.state_store.clear_all()
         self.metadata_eof_state.clear_all()
+        self.pending_state.clear_all()
         self.processed_messages.clear_all()
         self.eof_counter_store.clear_all()
 
