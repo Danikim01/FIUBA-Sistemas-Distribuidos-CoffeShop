@@ -1,5 +1,3 @@
-"""Configuration module for the Coffee Shop Gateway."""
-
 import os
 from typing import List
 

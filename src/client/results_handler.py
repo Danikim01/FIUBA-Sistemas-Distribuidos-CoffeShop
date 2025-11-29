@@ -1,5 +1,3 @@
-"""Results handling module for processing and persisting client results."""
-
 import json
 import logging
 import os

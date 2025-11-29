@@ -1,5 +1,3 @@
-"""Message handlers module for processing different types of messages."""
-
 import logging
 import socket
 from typing import Any, Dict, Tuple

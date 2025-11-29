@@ -1,5 +1,3 @@
-"""Queue manager module for handling RabbitMQ operations."""
-
 import logging
 import queue
 import threading
@@ -130,8 +128,7 @@ class QueueManager:
         # Batch counters for sequence ID generation per client
         self._batch_counters: dict[str, int] = {}
         self._batch_counters_lock = threading.Lock()
-        
-        # Initialize all queue connections
+
         self._init_queues()
         
         logger.info(f"Queue manager configured with RabbitMQ: {config.rabbitmq_host}:{config.rabbitmq_port}")

@@ -1,5 +1,3 @@
-"""Base worker class providing common functionality for all workers."""
-
 import logging
 import signal
 import threading
@@ -33,7 +31,6 @@ class BaseWorker(ABC):
     def __init__(self):
         """Initialize base worker.
         """
-        # Configure SIGTERM handling
         signal.signal(signal.SIGTERM, self._handle_sigterm)
 
         self.shutdown_requested = False
@@ -46,7 +43,6 @@ class BaseWorker(ABC):
         self._pause_requests = 0
         self._pause_consumption = False
 
-        # Initialize healthcheck service
         self.healthcheck_service = None
         try:
             self.healthcheck_service = HealthcheckService()

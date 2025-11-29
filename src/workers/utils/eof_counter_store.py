@@ -186,7 +186,6 @@ class EOFCounterStore:
                     counter = 0
 
             self._cache[client_id] = counter
-            # Initialize processed_uuids cache if not already loaded
             if client_id not in self._processed_eofs_cache:
                 self._processed_eofs_cache[client_id] = set()
             return counter

@@ -11,13 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class ItemsShardingRouter(ShardingRouter):
-    """
-    Items-specific sharding router that inherits from the base ShardingRouter.
-    
-    This router distributes transaction items to Items sharded workers based on item_id.
-    It reuses all the batching and routing logic from the base ShardingRouter.
-    """
-    
     def __init__(self):
         super().__init__(routing_field="item_id")
         logger.info("ItemsShardingRouter initialized - routing by item_id using base ShardingRouter")

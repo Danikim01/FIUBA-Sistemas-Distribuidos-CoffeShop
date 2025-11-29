@@ -11,13 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class TPVShardingRouter(ShardingRouter):
-    """
-    TPV-specific sharding router that inherits from the base ShardingRouter.
-    
-    This router distributes transactions to TPV sharded workers based on store_id.
-    It reuses all the batching and routing logic from the base ShardingRouter.
-    """
-    
     def __init__(self):
         super().__init__(routing_field="store_id")
         logger.info("TPVShardingRouter initialized - routing by store_id using base ShardingRouter")

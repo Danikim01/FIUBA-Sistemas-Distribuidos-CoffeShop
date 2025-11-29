@@ -22,11 +22,8 @@ class StoresMetadataStore(MetadataStore):
         """ 
         stores_exchange = os.getenv('STORES_EXCHANGE', 'stores_raw').strip()
         
-        # Each aggregator needs its own queue to receive ALL messages (fanout behavior)
-        # Determine queue name: use STORES_QUEUE env var if set, otherwise infer from script name
         stores_queue = os.getenv('STORES_QUEUE', '').strip()
         if not stores_queue:
-            # Infer worker type from script name for unique queue per aggregator
             script_name = sys.argv[0] if sys.argv else ''
             if 'tpv' in script_name.lower():
                 worker_type = 'tpv'
@@ -35,13 +32,11 @@ class StoresMetadataStore(MetadataStore):
             elif 'top_items' in script_name.lower():
                 worker_type = 'top_items'
             else:
-                # Fallback: use a generic name
                 worker_type = 'aggregator'
             stores_queue = f'{stores_exchange}_{worker_type}'
         
         logger.info(f"[STORES-METADATA] Using queue '{stores_queue}' for exchange '{stores_exchange}' (fanout)")
         
-        # Use fanout exchange so all aggregators receive all messages
         middleware = middleware_config.create_exchange(
             stores_exchange,
             queue_name=stores_queue,
@@ -50,7 +45,6 @@ class StoresMetadataStore(MetadataStore):
         )
         super().__init__(stores_exchange, middleware, eof_state_store=eof_state_store, metadata_type='stores')
         
-        # Cache en memoria para acceso rápido
         self.data: dict[ClientId, dict[StoreId, StoreName]] = {}
         
         self._persistence = MetadataPersistenceStore(
@@ -77,10 +71,8 @@ class StoresMetadataStore(MetadataStore):
         if not store_id or not store_name:
             return
         
-        # Actualizar cache en memoria
         self.data.setdefault(self.current_client_id, {})[store_id] = store_name
         
-        # Persistir en disco (append-only)
         self._persistence.save_item(self.current_client_id, store_id, store_name)
     
     def save_batch(self, data: list):
@@ -96,33 +88,25 @@ class StoresMetadataStore(MetadataStore):
         if not items:
             return
         
-        # Actualizar cache
         self.data.setdefault(self.current_client_id, {}).update(items)
         
-        # Persistir batch en disco
         self._persistence.save_batch(self.current_client_id, items)
 
     def _get_item(self, client_id: ClientId, item_id: str) -> StoreName:
         """Retrieve item from cache or persistence."""
-        # Primero buscar en cache en memoria
         stores = self.data.get(client_id, {})
         if item_id in stores:
             return stores[item_id]
         
-        # Si no está en cache, buscar en persistencia
         store_name = self._persistence.get_item(client_id, item_id)
         
-        # Si encontramos el item en persistencia, asegurarnos de que esté en cache
         if store_name != 'Unknown Store':
-            # Si el cliente no está en cache, cargar todos los datos desde persistencia
             if client_id not in self.data:
                 persisted_data = self._persistence.get_all_items(client_id)
                 if persisted_data:
                     self.data[client_id] = persisted_data
-                    # Retornar el valor del cache ahora
                     return self.data[client_id].get(item_id, 'Unknown Store')
             else:
-                # El cliente está en cache pero sin este item, actualizar cache con este item
                 self.data[client_id][item_id] = store_name
         
         return store_name

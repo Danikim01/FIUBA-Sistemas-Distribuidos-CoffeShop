@@ -1,5 +1,3 @@
-"""Configuration management module for the coffee shop client."""
-
 import os
 import json
 import logging

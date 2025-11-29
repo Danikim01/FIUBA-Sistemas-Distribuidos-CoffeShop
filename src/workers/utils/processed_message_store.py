@@ -41,7 +41,6 @@ class ProcessedMessageStore:
         self._cache: Dict[ClientId, Set[str]] = {}
         self._lock = threading.RLock()
         
-        # Load existing processed messages on startup
         self._load_all_clients()
 
     def _client_path(self, client_id: ClientId) -> Path:
@@ -56,20 +55,15 @@ class ProcessedMessageStore:
 
     def _load_all_clients(self) -> None:
         """Load all client processed message sets from disk on startup."""
-        # Find all client files (plain text files)
         client_files = list(self._store_dir.glob("*.txt"))
         
         loaded_count = 0
         for client_file in client_files:
             try:
-                # Extract client ID from filename
                 client_id = client_file.stem
-
-                # Load UUIDs from file (one per line)                
                 with client_file.open('r', encoding='utf-8') as f:
                     uuids = {line.strip() for line in f if line.strip()}
                 
-                # Load into cache
                 self._cache[client_id] = uuids
                 loaded_count += 1
                 logger.info(f"\033[32m[LOAD-ALL-CLIENTES] Loaded {len(uuids)} processed UUIDs for client {client_id}\033[0m")

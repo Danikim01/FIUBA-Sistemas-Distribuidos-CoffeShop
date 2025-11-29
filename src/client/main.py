@@ -33,23 +33,18 @@ class CoffeeShopClient:
         Args:
             config_file: Path to the configuration file
         """
-        # Initialize configuration
         self.config = ClientConfig(config_file)
         
-        # Initialize data processor
         self.data_processor = DataProcessor(
             self.config.data_dir,
             self.config.max_batch_size_kb
         )
         
-        # Initialize results handler
         self.results_handler = ResultsHandler(self.data_processor.data_dir)
         
-        # Initialize connection
         gateway_host, gateway_port = self.config.get_gateway_address()
         self.connection = ClientConnection(gateway_host, gateway_port)
         
-        # Initialize data sender
         self.data_sender = DataSender(self.connection, self.data_processor)
         
         logger.info("Coffee Shop Client initialized successfully")
@@ -133,16 +128,13 @@ class CoffeeShopClient:
 
 def main():
     """Entry point for the Coffee Shop Client application."""
-    # Configure SIGTERM handling
     signal.signal(signal.SIGTERM, handle_sigterm)
     
-    # Get config file from command line or use default
     config_file = sys.argv[1] if len(sys.argv) > 1 else 'workers_config.json'
     
     logger.info(f"Starting Coffee Shop Client with config file: {config_file}")
     
     try:
-        # Initialize and run client
         client = CoffeeShopClient(config_file)
         success = client.run()
         

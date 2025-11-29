@@ -26,23 +26,18 @@ logger = logging.getLogger(__name__)
 def test_continuous_sessions():
     """Test the continuous session functionality."""
     
-    # Initialize configuration
     config = ClientConfig('workers_config.json')
     
-    # Initialize data processor
     data_processor = DataProcessor(
         config.data_dir,
         config.max_batch_size_kb
     )
     
-    # Initialize results handler
     results_handler = ResultsHandler()
     
-    # Initialize connection
     gateway_host, gateway_port = config.get_gateway_address()
     connection = ClientConnection(gateway_host, gateway_port)
     
-    # Initialize data sender
     data_sender = DataSender(connection, data_processor)
     
     try:

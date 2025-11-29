@@ -1,5 +1,3 @@
-"""Client connection module for gateway communication and protocol handling."""
-
 import socket
 import logging
 from typing import List, Dict, Any

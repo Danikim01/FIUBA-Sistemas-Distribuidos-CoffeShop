@@ -28,7 +28,6 @@ class MenuItemsMetadataStore(MetadataStore):
         middleware = middleware_config.create_queue(menu_items_queue)
         super().__init__(menu_items_queue, middleware, eof_state_store=eof_state_store, metadata_type='menu_items')
         
-        # Cache en memoria para acceso rápido
         self.data: dict[ClientId, dict[ItemId, ItemName]] = {}
         
         self._persistence = MetadataPersistenceStore(
@@ -55,10 +54,8 @@ class MenuItemsMetadataStore(MetadataStore):
         if not item_id or not item_name:
             return
         
-        # Actualizar cache en memoria
         self.data.setdefault(self.current_client_id, {})[item_id] = item_name
         
-        # Persistir en disco (append-only)
         self._persistence.save_item(self.current_client_id, item_id, item_name)
 
     def save_batch(self, data: list):
@@ -74,33 +71,25 @@ class MenuItemsMetadataStore(MetadataStore):
         if not items:
             return
         
-        # Actualizar cache
         self.data.setdefault(self.current_client_id, {}).update(items)
         
-        # Persistir batch en disco
         self._persistence.save_batch(self.current_client_id, items)
 
     def _get_item(self, client_id: ClientId, item_id: ItemId) -> ItemName:
         """Retrieve item from cache or persistence."""
-        # Primero buscar en cache en memoria
         menu_items = self.data.get(client_id, {})
         if item_id in menu_items:
             return menu_items[item_id]
         
-        # Si no está en cache, buscar en persistencia
         item_name = self._persistence.get_item(client_id, item_id)
         
-        # Si encontramos el item en persistencia, asegurarnos de que esté en cache
         if item_name != 'Unknown Item':
-            # Si el cliente no está en cache, cargar todos los datos desde persistencia
             if client_id not in self.data:
                 persisted_data = self._persistence.get_all_items(client_id)
                 if persisted_data:
                     self.data[client_id] = persisted_data
-                    # Retornar el valor del cache ahora
                     return self.data[client_id].get(item_id, 'Unknown Item')
             else:
-                # El cliente está en cache pero sin este item, actualizar cache con este item
                 self.data[client_id][item_id] = item_name
         
         return item_name

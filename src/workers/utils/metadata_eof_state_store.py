@@ -22,7 +22,6 @@ class MetadataEOFStateStore:
     Allows checking if all metadata EOFs have arrived before processing transactions.
     """
     
-    # Tipos de metadata que se trackean
     METADATA_TYPES = {'users', 'stores', 'menu_items'}
     
     def __init__(self, required_metadata_types: Set[str] | None = None):
@@ -40,7 +39,6 @@ class MetadataEOFStateStore:
             self._store_dir = Path("state/metadata_eof_state")
         self._store_dir.mkdir(parents=True, exist_ok=True)
         
-        # Tipos de metadata requeridos para considerar "todo listo"
         if required_metadata_types is None:
             self.required_metadata_types = self.METADATA_TYPES.copy()
         else:
@@ -49,10 +47,8 @@ class MetadataEOFStateStore:
         self._cache: Dict[ClientId, Dict[str, bool]] = {}
         self._lock = threading.RLock()
         
-        # Limpiar archivos temporales de crashes anteriores
         self._cleanup_temp_files()
         
-        # Cargar estado existente al iniciar
         self._load_all_clients()
     
     def _cleanup_temp_files(self) -> None:
@@ -110,7 +106,6 @@ class MetadataEOFStateStore:
                 if not client_id:
                     client_id = client_file.stem
                 
-                # Validar checksum
                 payload = {
                     'client_id': client_id,
                     'metadata_state': metadata_state
@@ -120,7 +115,6 @@ class MetadataEOFStateStore:
                         f"[METADATA-EOF-STATE] Checksum mismatch for client {client_id}, trying backup"
                     )
                     
-                    # Intentar backup
                     backup_file = client_file.with_suffix('.backup.json')
                     if backup_file.exists():
                         try:
@@ -155,7 +149,6 @@ class MetadataEOFStateStore:
                         logger.warning(f"[METADATA-EOF-STATE] No backup available for client {client_id}")
                         continue
                 
-                # Cargar en cache
                 self._cache[client_id] = metadata_state
                 loaded_count += 1
                 logger.debug(
@@ -172,7 +165,6 @@ class MetadataEOFStateStore:
                 f"[METADATA-EOF-STATE] Loaded EOF state for {loaded_count} clients. "
                 f"Required metadata types: {self.required_metadata_types}"
             )
-            # Log detailed state for debugging
             for client_id, state in self._cache.items():
                 logger.info(
                     f"[METADATA-EOF-STATE] Client {client_id} state: {state}"
@@ -213,7 +205,6 @@ class MetadataEOFStateStore:
         backup_path = client_path.with_suffix('.backup.json')
         
         try:
-            # Crear payload con checksum
             payload = {
                 'client_id': client_id,
                 'metadata_state': metadata_state
@@ -221,13 +212,11 @@ class MetadataEOFStateStore:
             checksum = self._compute_checksum(payload)
             serialized = payload | {'checksum': checksum}
             
-            # Fase 1: Escribir a archivo temporal con fsync
             with temp_path.open('w', encoding='utf-8') as f:
                 json.dump(serialized, f, ensure_ascii=False, sort_keys=True)
                 f.flush()
                 os.fsync(f.fileno())
             
-            # Fase 2: Validar integridad del archivo temporal
             try:
                 with temp_path.open('r', encoding='utf-8') as f:
                     temp_data = json.load(f)
@@ -248,7 +237,6 @@ class MetadataEOFStateStore:
                 temp_path.unlink()
                 raise ValueError(f"Temp file validation failed: {exc}") from exc
             
-            # Fase 3: Reemplazo atómico
             if client_path.exists():
                 os.replace(client_path, backup_path)
             
@@ -294,7 +282,6 @@ class MetadataEOFStateStore:
                 f"Current state: {metadata_state}, Required: {self.required_metadata_types}"
             )
             
-            # Persistir atómicamente
             self._persist_client_atomic(client_id, metadata_state)
             
             logger.info(
@@ -319,7 +306,6 @@ class MetadataEOFStateStore:
         with self._lock:
             metadata_state = self._load_client(client_id)
             
-            # Verificar que todos los tipos requeridos estén done
             for metadata_type in self.required_metadata_types:
                 if not metadata_state.get(metadata_type, False):
                     logger.info(

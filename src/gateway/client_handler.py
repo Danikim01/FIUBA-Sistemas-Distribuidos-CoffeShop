@@ -1,5 +1,3 @@
-"""Client handler module for managing client connections and communication."""
-
 import logging
 import socket
 import threading
@@ -134,7 +132,6 @@ class ClientHandler:
         """Consume results from RabbitMQ and forward them to the specific client via TCP."""
         logger.info(f"Forwarding results to client {client_id}")
 
-        # Initialize seen transaction_ids set for this client
         seen_transaction_ids = set()
         self._seen_transaction_ids[client_id] = seen_transaction_ids
         
