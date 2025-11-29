@@ -571,11 +571,6 @@ class QueueManager:
         for routing_key in self._transaction_items_route_keys:
             _safe_send(self.transaction_items_exchange, routing_key=routing_key)
 
-        # Mandar a estas colas fue un error que causaba problemas en el aggregator 
-        # _safe_send(self.stores_exchange)
-        # _safe_send(self.users_queue)
-        # _safe_send(self.menu_items_queue)
-
         if send_errors:
             logger.warning("Some control broadcasts failed: %s", "; ".join(send_errors))
     
