@@ -219,7 +219,7 @@ class ShardingRouter(BaseWorker):
         logger.info("Cleaning up ShardingRouter")
         super().cleanup()
 
-    def _send_control_to_output(self, message: Dict[str, Any], client_id: ClientId) -> None:
+    def _send_control_to_output(self, message: Dict[str, Any], client_id: Optional[ClientId] = None) -> None:
         """
         Base worker method overridden to propagate control messages to every shard when the router publishes to an exchange.
         """
@@ -234,10 +234,6 @@ class ShardingRouter(BaseWorker):
                 message_uuid,
             )
             try:
-                # self.middleware_config.output_middleware.send(
-                #     shard_message,
-                #     routing_key=routing_key,
-                # )
                 self.send_message(
                     client_id=client_id,
                     data=shard_message,

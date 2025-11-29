@@ -324,7 +324,7 @@ class BaseWorker(ABC):
         """Handle a control message that requests global cleanup."""
         logger.info("[CONTROL] %s received global reset (default handler)", self.__class__.__name__)
 
-    def _send_control_to_output(self, message: Dict[str, Any], client_id: ClientId = None) -> None:
+    def _send_control_to_output(self, message: Dict[str, Any], client_id: Optional[ClientId] = None) -> None:
         """Send the control message to the worker's configured output middleware."""
         try:
             self.middleware_config.output_middleware.send(message)
