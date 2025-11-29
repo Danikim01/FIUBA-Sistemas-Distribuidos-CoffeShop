@@ -293,14 +293,14 @@ class EOFCounterStore:
             self._processed_eofs_cache[client_id] = processed_uuids
             return processed_uuids
 
-    def has_processed(self, client_id: ClientId, message_uuid: str) -> bool:
+    def has_processed(self, client_id: ClientId, message_uuid: str | None) -> bool:
         """Check if a EOF UUID has been processed for a client."""
         if not message_uuid:
             return False
         processed_uuids = self._load_processed_eofs_for_client(client_id)
         return message_uuid in processed_uuids
 
-    def mark_processed(self, client_id: ClientId, message_uuid: str) -> None:
+    def mark_processed(self, client_id: ClientId, message_uuid: str | None) -> None:
         """Mark a EOF UUID as processed for a client."""
         if not message_uuid:
             logger.debug(f"[EOF-COUNTER-STORE] Message UUID is None for client {client_id}")
@@ -357,3 +357,13 @@ class EOFCounterStore:
                 backup_path.unlink()
             logger.info(f"\033[32m[EOF-COUNTER-STORE] Cleared EOF counter and processed UUIDs for client {client_id}\033[0m")
 
+    def clear_all(self) -> None:
+        """Clear EOF counters and processed UUIDs for all clients."""
+        with self._lock:
+            self._cache.clear()
+            self._processed_eofs_cache.clear()
+            for pattern in ("*.json", "*.backup.json", "*.temp.json"):
+                for path in self._store_dir.glob(pattern):
+                    with contextlib.suppress(Exception):
+                        path.unlink()
+            logger.info("\033[32m[EOF-COUNTER-STORE] Cleared EOF counters for all clients\033[0m")
