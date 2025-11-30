@@ -334,8 +334,6 @@ class StateManager(Generic[T]):
             # Replace original with validated temp file (atomic operation)
             os.replace(temp_path, client_path)
             
-            #logger.debug("[PERSIST-CLIENT] Persisted state for client %s", client_id)
-            
         except Exception as exc:
             logger.error("[PERSIST-CLIENT] [ERROR] Failed to persist state for client %s: %s", 
                         client_id, exc)

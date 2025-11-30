@@ -107,7 +107,6 @@ class ShardedClientsWorker(ProcessWorker):
         store_id = safe_int_conversion(payload.get('store_id'), minimum=0)
         user_id = safe_int_conversion(payload.get('user_id'), minimum=0)
         
-        #logger.info(f"Processing transaction for store_id={store_id}")
         self.clients_data[client_id][store_id][user_id] += 1
 
     def create_payload(self, client_id: str) -> list[Dict[str, Any]]:

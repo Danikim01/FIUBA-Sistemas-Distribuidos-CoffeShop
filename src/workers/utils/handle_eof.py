@@ -153,7 +153,6 @@ class EOFHandler:
         
         try:
             publisher.send(message, routing_key=routing_key, exchange=exchange)
-            #logger.info(f"[MESSAGE UTILS] Additional metadata: {message.get('counter', {})}")
         except Exception as exc:
             logger.error(f"Failed to send EOF with routing key {routing_key}: {exc}")
             raise

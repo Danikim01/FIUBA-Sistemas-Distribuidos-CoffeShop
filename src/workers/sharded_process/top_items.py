@@ -137,7 +137,6 @@ class ShardedItemsWorker(ProcessWorker):
         quantity = safe_int_conversion(payload.get('quantity'), 0)
         subtotal = safe_float_conversion(payload.get('subtotal'), 0.0)
 
-        #logger.info(f"Processing items transaction for item_id={item_id_int}, year_month={year_month}, quantity={quantity}, subtotal={subtotal}")
         self._quantity_totals[client_id][year_month][item_id_int] += quantity
         self._profit_totals[client_id][year_month][item_id_int] += subtotal
 
