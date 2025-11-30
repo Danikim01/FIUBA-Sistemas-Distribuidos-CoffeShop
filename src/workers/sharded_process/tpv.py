@@ -7,8 +7,8 @@ import os
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional
-from message_utils import ClientId # pyright: ignore[reportMissingImports]
-from worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ClientId # pyright: ignore[reportMissingImports]
+from workers.utils.worker_utils import run_main, safe_float_conversion, safe_int_conversion, extract_year_half # pyright: ignore[reportMissingImports]
 from workers.sharded_process.process_worker import ProcessWorker
 from workers.utils.sharding_utils import get_routing_key_by_store_id, extract_store_id_from_payload
 from workers.state_manager.tpv import TPVStateManager
@@ -16,36 +16,6 @@ from workers.state_manager.tpv import TPVStateManager
 # Configurar logging básico
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Configurar FileHandler para escribir logs a archivo
-def setup_file_logging(worker_id: int):
-    """Configures a FileHandler to write logs to a file based on worker_id."""
-    # Crear directorio de logs si no existe
-    log_dir = Path("/app/logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Crear archivo de log con nombre basado en worker_id
-    log_file = log_dir / f"tpv_sharded_worker_{worker_id}.log"
-    
-    # Crear FileHandler
-    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-    file_handler.setLevel(logging.INFO)
-    
-    # Formato para el archivo (más detallado)
-    # El worker_id ya está en el nombre del archivo, así que no es necesario incluirlo en cada línea
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Agregar handler al logger raíz para capturar todos los logs
-    root_logger = logging.getLogger()
-    root_logger.addHandler(file_handler)
-    
-    # También agregar al logger específico
-    logger.addHandler(file_handler)
-    
-    logger.info(f"File logging configured: {log_file}")
 
 YearHalf = str
 StoreId = int
@@ -62,9 +32,6 @@ class ShardedTPVWorker(ProcessWorker):
         # Get sharding configuration from environment
         self.num_shards = int(os.getenv('NUM_SHARDS', '2'))
         self.worker_id = int(os.getenv('WORKER_ID', '0'))
-        
-        # Setup file logging for this worker
-        #setup_file_logging(self.worker_id)
         
         # Validate worker_id is within shard range
         if self.worker_id >= self.num_shards:
@@ -151,7 +118,6 @@ class ShardedTPVWorker(ProcessWorker):
         store_id = safe_int_conversion(payload.get('store_id'), minimum=0)
         amount: float = safe_float_conversion(payload.get('final_amount'), 0.0)
 
-        # logger.info(f"Processing TPV transaction for store_id={store_id}, year_half={year_half}, amount={amount}")
         self.partial_tpv[client_id][year_half][store_id] += amount
 
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
@@ -255,27 +221,6 @@ class ShardedTPVWorker(ProcessWorker):
             self._clients_with_eof.add(client_id)
             logger.info(f"[EOF] Marking client {client_id} as having received EOF. Future batches for this client will be rejected.")
         
-        # Obtener la data que se va a enviar antes de que create_payload la elimine del estado
-        with self._state_lock:
-            # Crear una copia de los datos para logging sin modificar el estado
-            totals_for_logging = {}
-            for year_half, stores in self.partial_tpv.get(client_id, {}).items():
-                totals_for_logging[year_half] = dict(stores)
-            
-            # Log de la data que se va a enviar
-            if totals_for_logging:
-                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: Preparando data para enviar al TPV aggregator")
-                total_tpv = 0.0
-                store_count = 0
-                for year_half, stores in totals_for_logging.items():
-                    for store_id, tpv_value in stores.items():
-                        total_tpv += tpv_value
-                        store_count += 1
-                        logger.info(f"[EOF] [DATA-TO-SEND]   - year_half={year_half}, store_id={store_id}, tpv={tpv_value}")
-                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: Resumen - {store_count} stores, total_tpv={total_tpv}")
-            else:
-                logger.info(f"[EOF] [DATA-TO-SEND] Client {client_id}: No hay data para enviar (estado vacío)")
-            
         with self._pause_message_processing():
             try:
                 # Send data to aggregator (this is done by AggregatorWorker.handle_eof)

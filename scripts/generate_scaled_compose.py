@@ -327,6 +327,28 @@ def apply_uniform_scale(config: Dict[str, Any], raw_scale: Optional[int]) -> Non
         worker_cfg["count"] = scale_value
 
 
+def sync_gateway_filter_replica_count(config: Dict[str, Any], workers: Dict[str, WorkerConfig]) -> None:
+    filter_counts = []
+    for key in ("year_filter", "items_year_filter"):
+        worker_cfg = workers.get(key)
+        if worker_cfg:
+            filter_counts.append(worker_cfg.count)
+
+    if not filter_counts:
+        return
+
+    target_replica_count = max(filter_counts)
+
+    service_env = ensure_mapping(config.get("service_environment"), "'service_environment'")
+    if service_env is None:
+        return
+    gateway_env = ensure_mapping(service_env.get("gateway"), "Service 'gateway' environment")
+    if gateway_env is None:
+        gateway_env = {}
+        service_env["gateway"] = gateway_env
+
+    gateway_env["FILTER_REPLICA_COUNT"] = str(target_replica_count)
+
 def normalize_environment(overrides: Optional[Mapping[str, Any]], context: str) -> Dict[str, str]:
     mapping = ensure_mapping(overrides, context)
     if not mapping:
@@ -999,6 +1021,7 @@ def generate_compose(config: Dict[str, Any]) -> str:
     is_reduced_dataset = client_config.get("REDUCED", False)
 
     worker_settings = load_worker_settings(raw_workers)
+    sync_gateway_filter_replica_count(config, worker_settings)
     worker_sections = generate_worker_sections(worker_settings, common_env, global_prefetch, is_reduced_dataset)
 
     base_services = render_base_services(config.get("service_environment"), common_env)

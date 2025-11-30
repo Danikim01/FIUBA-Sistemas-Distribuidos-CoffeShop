@@ -4,11 +4,10 @@
 
 import logging
 import os
-import threading
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping, Optional
-from message_utils import ClientId # pyright: ignore[reportMissingImports]
-from worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ClientId # pyright: ignore[reportMissingImports]
+from workers.utils.worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
 from workers.metadata_store.menu_items import MenuItemsMetadataStore
 from workers.sharded_process.process_worker import ProcessWorker
 from workers.utils.processed_message_store import ProcessedMessageStore
@@ -65,14 +64,14 @@ class TopItemsAggregator(ProcessWorker):
         # Create metadata store with EOF state tracking
         self.menu_items_source = MenuItemsMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
 
-        # Fault tolerance: Track processed message UUIDs
-        self.processed_messages = ProcessedMessageStore(worker_label="top_items_aggregator")
-        
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="top_items_aggregator")
         
         # Fault tolerance: Persist intermediate aggregation state
         self.state_store = AggregatorStateStore(worker_label="top_items_aggregator")
+        
+        # Track last processed message UUID per client (stored in state_store)
+        self._last_processed_message: Dict[ClientId, str] = {}
         
         # Number of sharded workers we expect EOFs from (must be set before loading state)
         self.expected_eof_count = int(os.getenv('REPLICA_COUNT', '2'))
@@ -121,6 +120,9 @@ class TopItemsAggregator(ProcessWorker):
                 for ym, items in profit_data.items():
                     for item_id, profit in items.items():
                         self._profit_totals[client_id][ym][int(item_id)] = float(profit)
+            
+            if 'last_processed_uuid' in state:
+                self._last_processed_message[client_id] = state['last_processed_uuid']
             
             if 'quantity_totals' in state or 'profit_totals' in state:
                 logger.info(
@@ -191,7 +193,7 @@ class TopItemsAggregator(ProcessWorker):
         self._process_pending_batches(client_id)
         
         # Check for duplicate message
-        if message_uuid and self.processed_messages.has_processed(client_id, message_uuid):
+        if message_uuid and self._last_processed_message.get(client_id) == message_uuid:
             logger.info(
                 f"[ITEMS-AGGREGATOR] [DUPLICATE] Skipping duplicate batch {message_uuid} "
                 f"for client {client_id} (already processed)"
@@ -213,7 +215,8 @@ class TopItemsAggregator(ProcessWorker):
         
         state_data = {
             'quantity_totals': quantity_data,
-            'profit_totals': profit_data
+            'profit_totals': profit_data,
+            'last_processed_uuid': self._last_processed_message.get(client_id)
         }
         logger.info(f"\033[92m[ITEMS-AGGREGATOR] Persisting state for client {client_id}\033[0m")
         self.state_store.save_state(client_id, state_data)
@@ -314,12 +317,12 @@ class TopItemsAggregator(ProcessWorker):
         with self._state_lock:
             self._quantity_totals.pop(client_id, None)
             self._profit_totals.pop(client_id, None)
+            self._last_processed_message.pop(client_id, None)
 
         self.menu_items_source.reset_state(client_id)
         self.metadata_eof_state.clear_client(client_id)
         self.pending_state.clear_client(client_id)
         self.state_store.clear_client(client_id)
-        self.processed_messages.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
 
     def get_item_name(self, clientId: ClientId, item_id: ItemId) -> str:
@@ -470,12 +473,12 @@ class TopItemsAggregator(ProcessWorker):
         with self._state_lock:
             self._quantity_totals.clear()
             self._profit_totals.clear()
+            self._last_processed_message.clear()
 
         self.menu_items_source.reset_all()
         self.metadata_eof_state.clear_all()
         self.pending_state.clear_all()
         self.state_store.clear_all()
-        self.processed_messages.clear_all()
         self.eof_counter_store.clear_all()
 
 

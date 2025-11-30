@@ -3,7 +3,7 @@
 set -euo pipefail
 
 COMPOSE_CMD=${COMPOSE_CMD:-"docker compose"}
-KILL_INTERVAL=0.25    # seconds between kills
+KILL_INTERVAL=1    # seconds between kills
 KILL_COUNT=0         # 0 => infinite
 
 # Worker type flags
@@ -12,6 +12,7 @@ INCLUDE_FILTER=false
 INCLUDE_EOF_BARRIER=false
 INCLUDE_ROUTERS=false
 INCLUDE_AGGREGATORS=false
+INCLUDE_HEALTHCHECKERS=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -36,12 +37,17 @@ while [[ $# -gt 0 ]]; do
       INCLUDE_AGGREGATORS=true
       shift
       ;;
+    -c|--healthcheckers)
+      INCLUDE_HEALTHCHECKERS=true
+      shift
+      ;;
     -a|--all)
       INCLUDE_SHARDED=true
       INCLUDE_FILTER=true
       INCLUDE_EOF_BARRIER=true
       INCLUDE_ROUTERS=true
       INCLUDE_AGGREGATORS=true
+      INCLUDE_HEALTHCHECKERS=true
       shift
       ;;
     -h|--help)
@@ -53,6 +59,7 @@ while [[ $# -gt 0 ]]; do
       echo "  -e, --eof-barrier     Incluir EOF barrier workers (ej: *-eof-barrier)"
       echo "  -r, --routers          Incluir sharding routers (ej: *-sharding-router)"
       echo "  -g, --aggregators      Incluir aggregators (ej: *-aggregator)"
+      echo "  -c, --healthcheckers   Incluir healthcheckers (ej: healthchecker-*), máximo 2 de 3"
       echo "  -a, --all             Incluir todos los tipos de workers"
       echo "  -h, --help            Mostrar este mensaje de ayuda"
       echo ""
@@ -69,6 +76,7 @@ while [[ $# -gt 0 ]]; do
       echo "  $0 -s                  # Solo sharded workers"
       echo "  $0 -f                   # Solo filter workers"
       echo "  $0 -e                   # Solo EOF barrier workers"
+      echo "  $0 -c                   # Solo healthcheckers (máximo 2 de 3)"
       echo "  $0 -s -f -e            # Sharded, filter y EOF barrier"
       echo "  $0 -a                  # Todos los tipos de workers"
       exit 0
@@ -87,7 +95,8 @@ if [[ "$INCLUDE_SHARDED" == "false" && \
       "$INCLUDE_FILTER" == "false" && \
       "$INCLUDE_EOF_BARRIER" == "false" && \
       "$INCLUDE_ROUTERS" == "false" && \
-      "$INCLUDE_AGGREGATORS" == "false" ]]; then
+      "$INCLUDE_AGGREGATORS" == "false" && \
+      "$INCLUDE_HEALTHCHECKERS" == "false" ]]; then
   INCLUDE_SHARDED=true
   INCLUDE_FILTER=true
 fi
@@ -107,6 +116,9 @@ if [[ "$INCLUDE_ROUTERS" == "true" ]]; then
 fi
 if [[ "$INCLUDE_AGGREGATORS" == "true" ]]; then
   WORKER_PATTERNS+=("*-aggregator")
+fi
+if [[ "$INCLUDE_HEALTHCHECKERS" == "true" ]]; then
+  WORKER_PATTERNS+=("healthchecker-*")
 fi
 get_all_services() {
   $COMPOSE_CMD ps --services
@@ -140,6 +152,32 @@ if [[ ${#WORKER_SERVICES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# Track killed healthcheckers (máximo 2 de 3)
+KILLED_HEALTHCHECKERS=()
+MAX_HEALTHCHECKER_KILLS=2
+
+is_healthchecker() {
+  local service=$1
+  [[ $service == healthchecker-* ]]
+}
+
+is_healthchecker_killed() {
+  local service=$1
+  for killed in "${KILLED_HEALTHCHECKERS[@]}"; do
+    if [[ $killed == "$service" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+can_kill_healthchecker() {
+  if [[ ${#KILLED_HEALTHCHECKERS[@]} -ge $MAX_HEALTHCHECKER_KILLS ]]; then
+    return 1
+  fi
+  return 0
+}
+
 choose_running_worker() {
   local running=()
   while IFS= read -r svc; do
@@ -150,6 +188,15 @@ choose_running_worker() {
   for svc in "${running[@]}"; do
     for worker in "${WORKER_SERVICES[@]}"; do
       if [[ $svc == "$worker" ]]; then
+        # Si es un healthchecker, verificar que no esté ya matado y que no se hayan matado ya 2
+        if is_healthchecker "$svc"; then
+          if is_healthchecker_killed "$svc"; then
+            continue  # Ya fue matado, saltarlo
+          fi
+          if ! can_kill_healthchecker; then
+            continue  # Ya se mataron 2 healthcheckers, no matar más
+          fi
+        fi
         candidates+=("$svc")
       fi
     done
@@ -171,6 +218,12 @@ perform_kill() {
   fi
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] Matando servicio worker: $target"
   $COMPOSE_CMD kill "$target"
+  
+  # Si es un healthchecker, agregarlo a la lista de matados
+  if is_healthchecker "$target"; then
+    KILLED_HEALTHCHECKERS+=("$target")
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Healthchecker matado. Total matados: ${#KILLED_HEALTHCHECKERS[@]}/$MAX_HEALTHCHECKER_KILLS"
+  fi
 }
 
 kills_done=0

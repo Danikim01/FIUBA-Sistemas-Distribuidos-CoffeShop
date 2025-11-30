@@ -4,9 +4,9 @@ import threading
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List
 from contextlib import contextmanager
-from handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
-from middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
-from message_utils import ( # pyright: ignore[reportMissingImports]
+from common.EOF.handle_eof import EOFHandler # pyright: ignore[reportMissingImports]
+from common.middleware.middleware_config import MiddlewareConfig # pyright: ignore[reportMissingImports]
+from workers.utils.message_utils import ( # pyright: ignore[reportMissingImports]
     ClientId,
     extract_data_and_client_id,
     extract_sequence_id,
@@ -113,7 +113,6 @@ class BaseWorker(ABC):
         
         # Send message with routing_key if it's an exchange middleware
         if routing_key:
-            #logger.info(f"[WORKER {self.__class__.__name__}] Sending message to routing key: {routing_key}")
             self.middleware_config.output_middleware.send(message, routing_key=routing_key)
         else:
             self.middleware_config.output_middleware.send(message)
@@ -189,11 +188,8 @@ class BaseWorker(ABC):
 
                 self._increment_inflight()
                 try:
-                    #logger.debug(f"Processing message for client {client_id}, data: {actual_data}")
                     if isinstance(actual_data, list):
-                        #logger.info(f"[BASE-WORKER] [BATCH-START] Processing batch of {len(actual_data)} messages for client {client_id}, message id: {message.get('message_uuid')}")
                         self.process_batch(actual_data, client_id)
-                        #logger.info(f"[BASE-WORKER] [BATCH-END] Batch processing completed for client {client_id}, message id: {message.get('message_uuid')}. About to return from on_message callback.")
                     else:
                         logger.info(f"Processing single message for client {client_id}, message id: {message.get('message_uuid')}")
        
