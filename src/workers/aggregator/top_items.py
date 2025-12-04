@@ -10,9 +10,11 @@ from workers.utils.message_utils import ClientId # pyright: ignore[reportMissing
 from workers.utils.worker_utils import run_main, safe_int_conversion, top_items_sort_key # pyright: ignore[reportMissingImports]
 from workers.metadata_store.menu_items import MenuItemsMetadataStore
 from workers.sharded_process.process_worker import ProcessWorker
-from common.persistence.eof_counter_store import EOFCounterStore
-from common.persistence.aggregator_state_store import AggregatorStateStore
-from common.persistence.metadata.metadata_eof_state_store import MetadataEOFStateStore
+from workers.utils.processed_message_store import ProcessedMessageStore
+from workers.utils.eof_counter_store import EOFCounterStore
+from workers.utils.aggregator_state_store import AggregatorStateStore
+from workers.utils.metadata_eof_state_store import MetadataEOFStateStore
+from workers.utils.pending_state_store import PendingStateStore
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -41,6 +43,9 @@ class TopItemsAggregator(ProcessWorker):
     def __init__(self) -> None:
         super().__init__()
         self.chunk_payload = False
+        self.pending_state = PendingStateStore(worker_label="top_items_aggregator")
+        self._pending_processing_lock = threading.Lock()
+        self._pending_processing_clients: set[ClientId] = set()
 
         self.top_per_month = safe_int_conversion(os.getenv("TOP_ITEMS_COUNT"), default=1)
 
@@ -51,11 +56,13 @@ class TopItemsAggregator(ProcessWorker):
         self._profit_totals = defaultdict(_new_profit_totals)
 
         # Metadata EOF tracking: Track EOFs for menu_items
-        self.metadata_eof_state = MetadataEOFStateStore(required_metadata_types={'menu_items'})
+        self.metadata_eof_state = MetadataEOFStateStore(
+            required_metadata_types={'menu_items'},
+            on_client_ready=self._on_metadata_ready,
+        )
         
         # Create metadata store with EOF state tracking
         self.menu_items_source = MenuItemsMetadataStore(self.middleware_config, eof_state_store=self.metadata_eof_state)
-        self.menu_items_source.start_consuming()
 
         # Fault tolerance: Track EOF counters with deduplication
         self.eof_counter_store = EOFCounterStore(worker_label="top_items_aggregator")
@@ -71,6 +78,8 @@ class TopItemsAggregator(ProcessWorker):
         
         # Load persisted state on startup
         self._load_persisted_state()
+        self._process_ready_clients_on_startup()
+        self.menu_items_source.start_consuming()
         
         logger.info(
             "%s configured with top_per_month=%s, expected_eof_count=%s",
@@ -173,18 +182,15 @@ class TopItemsAggregator(ProcessWorker):
     
     def process_batch(self, batch: list[Dict[str, Any]], client_id: ClientId):
         """Process a batch with deduplication and metadata readiness check."""
-        # Check if all metadata EOFs have been received for this client
-        if not self.metadata_eof_state.are_all_metadata_done(client_id):
-            # Not all metadata EOFs received yet, reject and requeue the message
-            logger.info(
-                f"\033[91m[TOP-ITEMS-AGGREGATOR] Not all metadata EOFs received for client {client_id}, "
-                f"requeuing transaction batch\033[0m"
-            )
-            raise InterruptedError(
-                f"\033[91m[TOP-ITEMS-AGGREGATOR] Metadata not ready for client {client_id}, message will be requeued\033[0m"
-            )
-        
         message_uuid = self._get_current_message_uuid()
+
+        # Check if all metadata EOFs have been received for this client
+        metadata_state = self.metadata_eof_state.get_metadata_state(client_id)
+        if not self.metadata_eof_state.are_all_metadata_done(client_id):
+            self._store_pending_batch(client_id, batch, message_uuid, metadata_state)
+            return
+        
+        self._process_pending_batches(client_id)
         
         # Check for duplicate message
         if message_uuid and self._last_processed_message.get(client_id) == message_uuid:
@@ -194,16 +200,7 @@ class TopItemsAggregator(ProcessWorker):
             )
             return
         
-        # Process the batch
-        with self._state_lock:
-            for entry in batch:
-                self.process_transaction(client_id, entry)
-            
-            if message_uuid:
-                self._last_processed_message[client_id] = message_uuid
-        
-        # Persist state after processing batch (for fault tolerance)
-        self._persist_state(client_id)
+        self._process_ready_batch(batch, client_id, message_uuid)
     
     def _persist_state(self, client_id: ClientId) -> None:
         """Persist the current aggregation state for a client."""
@@ -224,6 +221,97 @@ class TopItemsAggregator(ProcessWorker):
         logger.info(f"\033[92m[ITEMS-AGGREGATOR] Persisting state for client {client_id}\033[0m")
         self.state_store.save_state(client_id, state_data)
 
+    def _process_ready_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        client_id: ClientId,
+        message_uuid: Optional[str],
+    ) -> None:
+        if not batch:
+            return
+
+        with self._state_lock:
+            for entry in batch:
+                self.process_transaction(client_id, entry)
+
+        self._persist_state(client_id)
+
+        if message_uuid:
+            self.processed_messages.mark_processed(client_id, message_uuid)
+
+    def _store_pending_batch(
+        self,
+        client_id: ClientId,
+        batch: List[Dict[str, Any]],
+        message_uuid: Optional[str],
+        metadata_state: Optional[Dict[str, bool]] = None,
+    ) -> None:
+        stored = self.pending_state.add_batch(client_id, batch, message_uuid)
+        if stored:
+            logger.info(
+                "[ITEMS-AGGREGATOR] Metadata not ready for client %s, stored batch as pending "
+                "(state=%s)",
+                client_id,
+                metadata_state,
+            )
+        else:
+            logger.info(
+                "[ITEMS-AGGREGATOR] Metadata not ready for client %s, pending batch already stored "
+                "(state=%s)",
+                client_id,
+                metadata_state,
+            )
+
+    def _process_pending_batches(self, client_id: ClientId) -> None:
+        with self._pending_processing_lock:
+            if client_id in self._pending_processing_clients:
+                return
+            self._pending_processing_clients.add(client_id)
+
+        try:
+            pending_entries = self.pending_state.get_batches(client_id)
+            if not pending_entries:
+                return
+
+            logger.info(
+                "[ITEMS-AGGREGATOR] Replaying %s pending batches for client %s after metadata ready",
+                len(pending_entries),
+                client_id,
+            )
+
+            for entry in pending_entries:
+                batch = entry.get("batch") or []
+                if not batch:
+                    continue
+                pending_uuid = entry.get("message_uuid")
+                if pending_uuid and self.processed_messages.has_processed(client_id, pending_uuid):
+                    logger.info(
+                        "[ITEMS-AGGREGATOR] Skipping already processed pending batch %s for client %s",
+                        pending_uuid,
+                        client_id,
+                    )
+                    continue
+                self._process_ready_batch(batch, client_id, pending_uuid)
+
+            self.pending_state.clear_client(client_id)
+        finally:
+            with self._pending_processing_lock:
+                self._pending_processing_clients.discard(client_id)
+
+    def _on_metadata_ready(self, client_id: ClientId) -> None:
+        threading.Thread(
+            target=self._process_pending_batches,
+            args=(client_id,),
+            daemon=True,
+            name=f"TopItemsPendingReplayer-{client_id}",
+        ).start()
+
+    def _process_ready_clients_on_startup(self) -> None:
+        ready_clients = self.metadata_eof_state.get_ready_clients()
+        for client_id in ready_clients:
+            if self.pending_state.has_pending(client_id):
+                self._on_metadata_ready(client_id)
+
     def _clear_client_state(self, client_id: ClientId) -> None:
         """Clear memory and persistence for the given client."""
         with self._state_lock:
@@ -233,6 +321,7 @@ class TopItemsAggregator(ProcessWorker):
 
         self.menu_items_source.reset_state(client_id)
         self.metadata_eof_state.clear_client(client_id)
+        self.pending_state.clear_client(client_id)
         self.state_store.clear_client(client_id)
         self.eof_counter_store.clear_client(client_id)
 
@@ -388,6 +477,7 @@ class TopItemsAggregator(ProcessWorker):
 
         self.menu_items_source.reset_all()
         self.metadata_eof_state.clear_all()
+        self.pending_state.clear_all()
         self.state_store.clear_all()
         self.eof_counter_store.clear_all()
 
