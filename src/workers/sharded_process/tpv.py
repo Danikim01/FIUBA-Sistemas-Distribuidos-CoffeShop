@@ -69,9 +69,6 @@ class ShardedTPVWorker(ProcessWorker):
         
         self.partial_tpv = self.state_manager.state_data
         
-        # Track clients that have already received EOF to reject batches that arrive after EOF
-        self._clients_with_eof: set[ClientId] = set()
-
     def reset_state(self, client_id: ClientId) -> None:
         try:
             del self.partial_tpv[client_id]
@@ -124,21 +121,7 @@ class ShardedTPVWorker(ProcessWorker):
         if self.shutdown_requested:
             logger.info("[BATCH-FLOW] Shutdown requested, rejecting batch to requeue")
             raise InterruptedError("Shutdown requested before batch processing")
-        
-        # Reject batches that arrive after EOF for this client
-        # NOTE: This indicates a protocol error - batches should never arrive after EOF.
-        # This is a safety check, but the root cause should be fixed in the sharding router.
-        if client_id in self._clients_with_eof:
-            message_uuid = self._get_current_message_uuid()
-            logger.info(
-                "[PROCESSING - BATCH] [PROTOCOL-ERROR] Batch %s for client %s arrived AFTER EOF (protocol violation). "
-                "This indicates the sharding router sent EOF before all batches were delivered. "
-                "Discarding batch to prevent incorrect processing.",
-                message_uuid,
-                client_id,
-            )
-            raise Exception(f"Batch arrived after EOF for client {client_id} (protocol error), discarding")
-            
+                    
         message_uuid = self._get_current_message_uuid()
 
         if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
@@ -216,15 +199,9 @@ class ShardedTPVWorker(ProcessWorker):
             logger.info("Shutdown requested, rejecting EOF to requeue")
             raise InterruptedError("Shutdown requested before EOF handling")
         
-        # Mark this client as having received EOF to reject any batches that arrive after
-        with self._state_lock:
-            self._clients_with_eof.add(client_id)
-            logger.info(f"[EOF] Marking client {client_id} as having received EOF. Future batches for this client will be rejected.")
         
         with self._pause_message_processing():
             try:
-                # Send data to aggregator (this is done by AggregatorWorker.handle_eof)
-                # But we need to avoid calling BaseWorker.handle_eof which uses consensus mechanism
                 payload_batches: list[list[Dict[str, Any]]] = []
                 with self._state_lock:
                     payload = self.create_payload(client_id)
@@ -238,9 +215,6 @@ class ShardedTPVWorker(ProcessWorker):
                 for chunk in payload_batches:
                     self.send_payload(chunk, client_id)
                 
-                # Send EOF directly to output WITHOUT consensus mechanism
-                # This is the key change: sharded workers send EOF directly to aggregator
-                # Extract and propagate sequence_id from the received EOF message
                 from workers.utils.message_utils import extract_sequence_id
                 sequence_id = extract_sequence_id(message)
                 logger.info(f"[EOF] [SHARDED-WORKER] Sending EOF directly to TPV aggregator for client {client_id} (no consensus), sequence_id: {sequence_id}")
@@ -266,7 +240,6 @@ class ShardedTPVWorker(ProcessWorker):
         """Remove in-memory and persisted data for the client."""
         with self._state_lock:
             self.partial_tpv.pop(client_id, None)
-            self._clients_with_eof.discard(client_id)
 
         self.state_manager.clear_last_processed_message(client_id)
         self.state_manager.drop_empty_client_state(client_id)
@@ -279,7 +252,6 @@ class ShardedTPVWorker(ProcessWorker):
     def handle_reset_all_clients(self) -> None:
         with self._state_lock:
             self.partial_tpv.clear()
-            self._clients_with_eof.clear()
 
         self.state_manager.state_data = defaultdict(lambda: defaultdict(lambda: defaultdict(float)))
         self.state_manager.clear_last_processed_messages()

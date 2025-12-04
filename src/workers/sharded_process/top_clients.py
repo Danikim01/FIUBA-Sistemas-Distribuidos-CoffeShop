@@ -69,9 +69,6 @@ class ShardedClientsWorker(ProcessWorker):
         
         self.clients_data = self.state_manager.state_data
         
-        # Track clients that have already received EOF to reject batches that arrive after EOF
-        self._clients_with_eof: set[ClientId] = set()
-
     def reset_state(self, client_id: ClientId) -> None:
         self.clients_data[client_id] = defaultdict(lambda: defaultdict(int))
 
@@ -144,18 +141,7 @@ class ShardedClientsWorker(ProcessWorker):
         if self.shutdown_requested:
             logger.info("[BATCH-FLOW] Shutdown requested, rejecting batch to requeue")
             raise InterruptedError("Shutdown requested before batch processing")
-        
-        # Reject batches that arrive after EOF for this client
-        if client_id in self._clients_with_eof:
-            message_uuid = self._get_current_message_uuid()
-            logger.info(
-                "[PROCESSING - BATCH] [PROTOCOL-ERROR] Batch %s for client %s arrived AFTER EOF (protocol violation). "
-                "Discarding batch to prevent incorrect processing.",
-                message_uuid,
-                client_id,
-            )
-            raise Exception(f"Batch arrived after EOF for client {client_id} (protocol error), discarding")
-            
+                    
         message_uuid = self._get_current_message_uuid()
 
         if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
@@ -216,12 +202,7 @@ class ShardedClientsWorker(ProcessWorker):
         if self.shutdown_requested:
             logger.info("Shutdown requested, rejecting EOF to requeue")
             raise InterruptedError("Shutdown requested before EOF handling")
-        
-        # Mark this client as having received EOF
-        with self._state_lock:
-            self._clients_with_eof.add(client_id)
-            logger.info(f"[EOF] Marking client {client_id} as having received EOF. Future batches for this client will be rejected.")
-        
+                
         logger.info(f"[EOF] [SHARDED-CLIENTS-WORKER] Received EOF for client {client_id}")
         
         with self._pause_message_processing():
@@ -266,7 +247,6 @@ class ShardedClientsWorker(ProcessWorker):
     def _clear_client_state(self, client_id: ClientId) -> None:
         with self._state_lock:
             self.clients_data.pop(client_id, None)
-            self._clients_with_eof.discard(client_id)
 
         self.state_manager.clear_last_processed_message(client_id)
         self.state_manager.drop_empty_client_state(client_id)
@@ -279,7 +259,6 @@ class ShardedClientsWorker(ProcessWorker):
     def handle_reset_all_clients(self) -> None:
         with self._state_lock:
             self.clients_data.clear()
-            self._clients_with_eof.clear()
 
         self.state_manager.clear_last_processed_messages()
         self.state_manager.clear_all_files()

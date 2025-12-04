@@ -84,9 +84,6 @@ class ShardedItemsWorker(ProcessWorker):
         self._quantity_totals = self.state_manager.quantity_totals
         self._profit_totals = self.state_manager.profit_totals
         
-        # Track clients that have already received EOF to reject batches that arrive after EOF
-        self._clients_with_eof: set[ClientId] = set()
-
     def reset_state(self, client_id: ClientId) -> None:
         self._quantity_totals[client_id] = _new_monthly_quantity_map()
         self._profit_totals[client_id] = _new_monthly_profit_map()
@@ -102,15 +99,7 @@ class ShardedItemsWorker(ProcessWorker):
         Returns:
             True if this worker should process the transaction item
         """
-        # Check if this is a control message (EOF, heartbeat, etc.)
-        # Control messages like EOF don't have item_id and should not be processed
         item_id = extract_item_id_from_payload(payload)
-        if item_id is None:
-            # This is likely a control message (EOF, etc.) - don't process it
-            logger.debug(f"Received control message (no item_id): {payload}")
-            return False
-        
-        # For regular transaction items, verify they belong to our shard
         expected_routing_key = get_routing_key_by_item_id(item_id, self.num_shards)
         if expected_routing_key != self.expected_routing_key:
             logger.warning(f"Received transaction item for wrong shard: item_id={item_id}, expected={self.expected_routing_key}, got={expected_routing_key}")
@@ -190,17 +179,6 @@ class ShardedItemsWorker(ProcessWorker):
             logger.info("[BATCH-FLOW] Shutdown requested, rejecting batch to requeue")
             raise InterruptedError("Shutdown requested before batch processing")
         
-        # Reject batches that arrive after EOF for this client
-        if client_id in self._clients_with_eof:
-            message_uuid = self._get_current_message_uuid()
-            logger.info(
-                "[PROCESSING - BATCH] [PROTOCOL-ERROR] Batch %s for client %s arrived AFTER EOF (protocol violation). "
-                "Discarding batch to prevent incorrect processing.",
-                message_uuid,
-                client_id,
-            )
-            raise Exception(f"Batch arrived after EOF for client {client_id} (protocol error), discarding")
-            
         message_uuid = self._get_current_message_uuid()
 
         if message_uuid and self.state_manager.get_last_processed_message(client_id) == message_uuid:
@@ -261,12 +239,7 @@ class ShardedItemsWorker(ProcessWorker):
         if self.shutdown_requested:
             logger.info("Shutdown requested, rejecting EOF to requeue")
             raise InterruptedError("Shutdown requested before EOF handling")
-        
-        # Mark this client as having received EOF
-        with self._state_lock:
-            self._clients_with_eof.add(client_id)
-            logger.info(f"[EOF] Marking client {client_id} as having received EOF. Future batches for this client will be rejected.")
-        
+                
         logger.info(f"[EOF] [SHARDED-ITEMS-WORKER] Received EOF for client {client_id}")
         
         with self._pause_message_processing():
@@ -312,7 +285,6 @@ class ShardedItemsWorker(ProcessWorker):
         with self._state_lock:
             self._quantity_totals.pop(client_id, None)
             self._profit_totals.pop(client_id, None)
-            self._clients_with_eof.discard(client_id)
 
         self.state_manager.clear_last_processed_message(client_id)
         self.state_manager.drop_empty_client_state(client_id)
@@ -326,7 +298,6 @@ class ShardedItemsWorker(ProcessWorker):
         with self._state_lock:
             self._quantity_totals.clear()
             self._profit_totals.clear()
-            self._clients_with_eof.clear()
 
         self.state_manager.clear_last_processed_messages()
         self.state_manager.clear_all_files()
