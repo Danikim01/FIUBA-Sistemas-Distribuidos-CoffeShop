@@ -9,7 +9,7 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Dict, Set
+from typing import Callable, Dict, List, Optional, Set
 
 from workers.utils.message_utils import ClientId
 
@@ -24,13 +24,19 @@ class MetadataEOFStateStore:
     
     METADATA_TYPES = {'users', 'stores', 'menu_items'}
     
-    def __init__(self, required_metadata_types: Set[str] | None = None):
+    def __init__(
+        self,
+        required_metadata_types: Set[str] | None = None,
+        on_client_ready: Optional[Callable[[ClientId], None]] = None,
+    ):
         """
         Initialize the metadata EOF state store.
         
         Args:
             required_metadata_types: Set of required metadata types.
                                    If None, uses all available types.
+            on_client_ready: Optional callback executed when a client has
+                completed all required metadata EOFs.
         """
         base_dir = os.getenv("STATE_DIR")
         if base_dir:
@@ -46,10 +52,18 @@ class MetadataEOFStateStore:
         
         self._cache: Dict[ClientId, Dict[str, bool]] = {}
         self._lock = threading.RLock()
+        self._ready_callbacks: List[Callable[[ClientId], None]] = []
+        if on_client_ready:
+            self._ready_callbacks.append(on_client_ready)
         
         self._cleanup_temp_files()
         
         self._load_all_clients()
+
+    def register_ready_callback(self, callback: Callable[[ClientId], None]) -> None:
+        """Register an additional callback for ready clients."""
+        with self._lock:
+            self._ready_callbacks.append(callback)
     
     def _cleanup_temp_files(self) -> None:
         """Cleans up temporary files from previous crashes."""
@@ -252,6 +266,25 @@ class MetadataEOFStateStore:
                 temp_path.unlink()
             raise
     
+    def _is_ready_state(self, metadata_state: Dict[str, bool]) -> bool:
+        for metadata_type in self.required_metadata_types:
+            if not metadata_state.get(metadata_type, False):
+                return False
+        return True
+
+    def _notify_client_ready(self, client_id: ClientId) -> None:
+        callbacks: List[Callable[[ClientId], None]]
+        with self._lock:
+            callbacks = list(self._ready_callbacks)
+        for callback in callbacks:
+            try:
+                callback(client_id)
+            except Exception as exc:
+                logger.error(
+                    f"[METADATA-EOF-STATE] Ready callback failed for client {client_id}: {exc}",
+                    exc_info=True,
+                )
+
     def mark_metadata_done(self, client_id: ClientId, metadata_type: str) -> None:
         """
         Marks a metadata type as done for a client.
@@ -266,6 +299,7 @@ class MetadataEOFStateStore:
             )
             return
         
+        notify_ready = False
         with self._lock:
             metadata_state = self._load_client(client_id)
             if metadata_state.get(metadata_type, False):
@@ -274,6 +308,7 @@ class MetadataEOFStateStore:
                 )
                 return
             
+            was_ready = self._is_ready_state(metadata_state)
             metadata_state[metadata_type] = True
             self._cache[client_id] = metadata_state
             
@@ -292,6 +327,15 @@ class MetadataEOFStateStore:
             logger.info(
                 f"\033[92m[METADATA-EOF-STATE] Marked {metadata_type} as done for client {client_id}\033[0m"
             )
+            
+            if not was_ready and self._is_ready_state(metadata_state):
+                notify_ready = True
+        
+        if notify_ready:
+            logger.info(
+                f"[METADATA-EOF-STATE] Client {client_id} completed all metadata EOFs"
+            )
+            self._notify_client_ready(client_id)
     
     def are_all_metadata_done(self, client_id: ClientId) -> bool:
         """
@@ -305,6 +349,11 @@ class MetadataEOFStateStore:
         """
         with self._lock:
             metadata_state = self._load_client(client_id)
+            if self._is_ready_state(metadata_state):
+                logger.debug(
+                    f"[METADATA-EOF-STATE] All metadata done for client {client_id}: {metadata_state}"
+                )
+                return True
             
             for metadata_type in self.required_metadata_types:
                 if not metadata_state.get(metadata_type, False):
@@ -312,12 +361,17 @@ class MetadataEOFStateStore:
                         f"[METADATA-EOF-STATE] Client {client_id} not ready: {metadata_type} not done yet. "
                         f"Required types: {self.required_metadata_types}, Current state: {metadata_state}"
                     )
-                    return False
-            
-            logger.debug(
-                f"[METADATA-EOF-STATE] All metadata done for client {client_id}: {metadata_state}"
-            )
-            return True
+                    break
+            return False
+
+    def get_ready_clients(self) -> List[ClientId]:
+        """Return clients that already have all required metadata."""
+        ready: List[ClientId] = []
+        with self._lock:
+            for client_id, metadata_state in self._cache.items():
+                if self._is_ready_state(metadata_state):
+                    ready.append(client_id)
+        return ready
     
     def clear_client(self, client_id: ClientId) -> None:
         """Clears the state of a client."""
